@@ -76,6 +76,40 @@ Linux examples; Windows binaries have an `.exe` suffix:
 
 ## Run the web service
 
+### Recommended: Docker release with mounted directories
+
+Download and checksum-verify `ggfm-patcher-docker-linux-amd64.zip` from
+[Releases](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher/releases).
+Extract it to a new directory and run there (replace the public HTTPS origin):
+
+```sh
+docker build --platform linux/amd64 -t ggfm-patcher:local .
+mkdir -p data input
+sudo chown 10001:10001 data
+docker run -d --name ggfm-patcher --restart unless-stopped \
+  --cpus 2 --memory 4g --pids-limit 160 \
+  --security-opt no-new-privileges --cap-drop ALL \
+  -p 127.0.0.1:8088:8080 \
+  -e GGFM_PUBLIC_ORIGIN=https://patch.example.org \
+  --mount type=bind,source="$(pwd)/data",target=/data \
+  --mount type=bind,source="$(pwd)/input",target=/input,readonly \
+  ggfm-patcher:local
+docker logs -f ggfm-patcher
+```
+
+`data/` persists the signing identity, cache and work files: keep it across
+upgrades. Optionally place a supported `original.xapk` in `input/` before
+starting; it is mounted read-only and prepared once. Without a valid original,
+the site accepts complete verified uploads instead. Wait for `READY`.
+
+The image contains no game, and requires no host Java/Android/Python setup.
+The Docker build needs network access to fetch its pinned source/tools. Attach
+your external nginx or Cloudflare Tunnel to port 8088; never expose this trusted
+proxy entry directly to the Internet. See the [Docker deployment guide](docker/README.md)
+for nginx/Cloudflare restrictions, permissions, disk space and updates.
+
+### Native/manual deployment
+
 Read [deployment setup](docs/DEPLOYMENT.md) and [public hosting requirements](docs/PUBLIC_DEPLOYMENT.md) before publishing a service.
 
 1. Obtain the compiled Patch runtime for the exact clean `patch/` commit. Read its `dependencies.json` and obtain the **matching** Server artifact. Verify every digest and ABI; never mix independently moving Nightlies.
@@ -92,7 +126,7 @@ export RUST_LOG=info
 ./target/release/ggfm-patcher-web
 ```
 
-The service validates dependencies before opening its loopback listener. Use one process and one heavy worker. The public release is a Linux CLI/web archive, not a turnkey Docker image containing the game.
+The service validates dependencies before opening its loopback listener. Use one process and one heavy worker. Releases provide a native CLI/web archive and a resource-free Docker build context; neither contains the game.
 
 ### Two deployment modes
 
@@ -109,7 +143,7 @@ Cache identity includes source, exact Patch/Server versions and hashes, policy, 
 
 ### Public ingress, limits and failure bans
 
-The repository's supported public configuration uses a **local Cloudflare Tunnel** connector. It trusts visitor identity only from explicitly trusted local proxy addresses. Keep the origin inaccessible directly and follow the deployment document's origin/cache checks.
+The native public configuration uses a **local Cloudflare Tunnel** connector. The Docker guide additionally covers host nginx behind Cloudflare. Visitor identity is trusted only through the configured proxy boundary. Keep the origin inaccessible directly and follow the deployment document's origin/cache checks.
 
 - Per-IP request/API/upload/download limits and global/per-IP in-flight limits.
 - Eight qualifying failures within ten minutes trigger a fifteen-minute in-process ban. This is not an OS Fail2ban daemon or a Cloudflare account firewall rule; restarting resets this in-memory state.

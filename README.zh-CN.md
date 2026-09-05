@@ -76,6 +76,38 @@ python tools/test_deployment.py
 
 ## 运行网页服务
 
+### 推荐：Docker Release，挂载目录部署
+
+从 [Releases](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher/releases)
+下载并校验 `ggfm-patcher-docker-linux-amd64.zip`，解压到新目录，在其中执行
+（将 HTTPS origin 替换为自己的域名）：
+
+```sh
+docker build --platform linux/amd64 -t ggfm-patcher:local .
+mkdir -p data input
+sudo chown 10001:10001 data
+docker run -d --name ggfm-patcher --restart unless-stopped \
+  --cpus 2 --memory 4g --pids-limit 160 \
+  --security-opt no-new-privileges --cap-drop ALL \
+  -p 127.0.0.1:8088:8080 \
+  -e GGFM_PUBLIC_ORIGIN=https://patch.example.org \
+  --mount type=bind,source="$(pwd)/data",target=/data \
+  --mount type=bind,source="$(pwd)/input",target=/input,readonly \
+  ggfm-patcher:local
+docker logs -f ggfm-patcher
+```
+
+`data/` 持久保存签名身份、缓存和工作文件，升级时必须保留。
+可以在启动前把匹配原包放入 `input/original.xapk`，只读挂载并自动制作一次成品；
+没有有效原包就接受完整校验上传。等日志出现 `READY` 后再使用。
+
+镜像不含游戏，不要求宿主机安装 Java / Android / Python；构建镜像时需要联网
+下载固定源码/工具。你自己的 nginx 或 Cloudflare Tunnel 接本机 8088 即可，
+不要将这个可信代理入口直接暴露公网。权限、空间、更新及 nginx / Cloudflare
+限制详见 [Docker 部署说明](docker/README.zh-CN.md)。
+
+### 原生 / 手动部署
+
 公开部署前先阅读 [部署步骤](docs/DEPLOYMENT.md) 和 [公网安全要求](docs/PUBLIC_DEPLOYMENT.md)。
 
 1. 获取与干净 `patch/` 准确提交对应的已编译运行时，读取其 `dependencies.json`，取得**匹配的** Server。核对全部摘要和 ABI，不要混用独立变化的 Nightly。
@@ -92,7 +124,7 @@ export RUST_LOG=info
 ./target/release/ggfm-patcher-web
 ```
 
-服务先验证依赖，之后才监听本机回环地址。部署只运行一个进程、一个重型 worker。公开 Release 是 Linux CLI / 网页工具压缩包，不是包含游戏的一键 Docker 镜像。
+服务先验证依赖，之后才监听本机回环地址。部署只运行一个进程、一个重型 worker。Release 同时提供原生 CLI / 网页工具包和无游戏资源的 Docker 构建包，两者都不含游戏。
 
 ### 两种部署模式
 
@@ -109,7 +141,7 @@ export RUST_LOG=info
 
 ### 公网入口、限制和失败封禁
 
-仓库支持的公网配置使用**本机 Cloudflare Tunnel**，仅信任明确配置的本地代理传来的访客身份。禁止绕过代理直连源站，并按部署文档验证 origin 和缓存规则。
+原生公网配置使用**本机 Cloudflare Tunnel**，Docker 指南另覆盖 Cloudflare 后的宿主机 nginx。仅通过配置的可信代理边界接受访客身份；禁止绕过代理直连源站，并按部署文档验证 origin 和缓存规则。
 
 - 按 IP 限制请求、API、上传和下载，并限制全局/单 IP 同时处理数。
 - 十分钟内 8 次符合条件的失败会触发十五分钟的进程内封禁。这不是 OS Fail2ban，也不会修改 Cloudflare 账号防火墙规则；重启会清除内存封禁状态。

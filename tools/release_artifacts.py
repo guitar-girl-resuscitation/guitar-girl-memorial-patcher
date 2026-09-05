@@ -11,6 +11,10 @@ import subprocess
 import zipfile
 
 KINDS = {
+    "patcher-docker-linux-amd64": {"Dockerfile", "prepare.py", "entrypoint.py", "healthcheck.py",
+        "docker-lock.json", "ggfm-patcher", "ggfm-patcher-web", "classes.dex",
+        "libggfm_bootstrap.so", "libdobby.so", "libggfm_server.so", "dependencies.json",
+        "DOBBY-LICENSE", "THIRD_PARTY_TERMINAL_FONT.md", "README.md", "README.zh-CN.md", "VERSIONING.md"},
     "server-android-arm64": {"libggfm_server.so", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "server-linux-x64": {"ggfm-server", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "server-windows-x64": {"ggfm-server.exe", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
@@ -89,7 +93,7 @@ def pack(kind, files, destination):
 
 def verify_archive(path, commit=None):
     with zipfile.ZipFile(path) as z:
-        if len(z.infolist()) > 16 or sum(i.file_size for i in z.infolist()) > 256 * 1024**2:
+        if len(z.infolist()) > 32 or sum(i.file_size for i in z.infolist()) > 256 * 1024**2:
             raise ValueError("unexpected archive size")
         names = z.namelist()
         if len(names) != len(set(names)):
