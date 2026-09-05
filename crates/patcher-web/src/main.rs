@@ -518,7 +518,8 @@ async fn download(
         verify_prepared_metadata(prebuilt)?;
     }
     let file = tokio::fs::File::open(grant.path).await.map_err(internal)?;
-    Ok((
+    let length = file.metadata().await.map_err(internal)?.len();
+    let mut response = (
         [
             (header::CONTENT_TYPE, "application/octet-stream"),
             (
@@ -528,7 +529,14 @@ async fn download(
         ],
         Body::from_stream(ReaderStream::new(file)),
     )
-        .into_response())
+        .into_response();
+    // A stream timeout/disconnect must be detected as an incomplete download,
+    // never a successfully completed (but truncated) XAPK.
+    response.headers_mut().insert(
+        header::CONTENT_LENGTH,
+        length.to_string().parse().map_err(internal)?,
+    );
+    Ok(response)
 }
 
 fn build_or_reuse(
@@ -831,6 +839,7 @@ mod tests {
         let response = download(State(state.clone()), AxumPath(ready.download_token.clone()))
             .await
             .unwrap();
+        assert_eq!(response.headers()[header::CONTENT_LENGTH], "23");
         assert_eq!(
             axum::body::to_bytes(response.into_body(), 1024)
                 .await
