@@ -15,8 +15,8 @@ KINDS = {
     "server-linux-x64": {"ggfm-server", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "server-windows-x64": {"ggfm-server.exe", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "patch-android-arm64": {"classes.dex", "libggfm_bootstrap.so", "libdobby.so", "memorial-policy.v1.json", "DOBBY-LICENSE", "dependencies.json"},
-    "patcher-linux-x64": {"ggfm-patcher", "ggfm-patcher-web", "patcher.example.json", "DEPLOYMENT.md"},
-    "patcher-windows-x64": {"ggfm-patcher.exe", "ggfm-patcher-web.exe", "patcher.example.json", "DEPLOYMENT.md"},
+    "patcher-linux-x64": {"ggfm-patcher", "ggfm-patcher-web", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
+    "patcher-windows-x64": {"ggfm-patcher.exe", "ggfm-patcher-web.exe", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
 }
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -144,4 +144,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

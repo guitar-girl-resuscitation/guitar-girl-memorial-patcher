@@ -1,0 +1,44 @@
+# Review paths and provision the ggfm user/directories before installing.
+[Unit]
+Description=Guitar Girl Memorial web patcher
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=ggfm
+Group=ggfm
+WorkingDirectory=/opt/ggfm/patcher
+ExecStart=/opt/ggfm/bin/ggfm-patcher-web
+Environment=GGFM_PATCHER_CONFIG=/etc/ggfm/patcher.json
+Environment=RUST_LOG=info
+EnvironmentFile=/etc/ggfm/signing.env
+Restart=on-failure
+RestartSec=10
+KillMode=control-group
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/srv/ggfm/work /srv/ggfm/cache
+RestrictSUIDSGID=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Java/Python must remain able to allocate executable memory; do not add
+# MemoryDenyWriteExecute=true. Patch tools are subprocesses of this cgroup.
+MemoryHigh=3G
+MemoryMax=4G
+CPUQuota=200%
+TasksMax=128
+LimitNOFILE=1024
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ggfm-patcher
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,14 @@
+# Locally managed Cloudflare Tunnel. Replace UUID/hostname; credentials stay private.
+tunnel: 00000000-0000-0000-0000-000000000000
+credentials-file: /etc/cloudflared/ggfm-credentials.json
+# Avoid per-request debug logs (download URLs contain single-use bearer tokens).
+loglevel: fatal
+metrics: 127.0.0.1:20241
+ingress:
+  - hostname: patch.example.org
+    service: http://127.0.0.1:8080
+    originRequest:
+      connectTimeout: 5s
+      keepAliveTimeout: 15s
+      keepAliveConnections: 32
+  - service: http_status:404

@@ -18,8 +18,9 @@ use axum::{
 };
 use futures_util::StreamExt;
 use ggfm_patcher_core::{
-    ArtifactVersions, ChallengeState, ChunkChallenge, ChunkProof, CompatibilityManifest, Limits,
-    PatchArtifacts, PatchPlan, Pipeline, SigningConfig, Toolchain, sha256_file, verify_xapk,
+    ArtifactVersions, ChallengeError, ChallengeState, ChunkChallenge, ChunkProof,
+    CompatibilityManifest, Limits, PatchArtifacts, PatchPlan, Pipeline, SigningConfig, Toolchain,
+    sha256_file, verify_xapk,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -28,6 +29,8 @@ use tokio::{
     sync::{Mutex, Semaphore},
 };
 use tokio_util::io::ReaderStream;
+
+mod security;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -42,6 +45,8 @@ struct Config {
     versions: VersionConfig,
     prebuilt: Option<PrebuiltConfig>,
     application_id: Option<String>,
+    #[serde(default)]
+    security: security::SecurityConfig,
 }
 
 #[derive(Clone, Deserialize)]
@@ -157,6 +162,14 @@ struct WebError(StatusCode, String);
 
 impl IntoResponse for WebError {
     fn into_response(self) -> Response {
+        if self.0.is_server_error() {
+            tracing::error!(status = self.0.as_u16(), diagnostic = %self.1, "request failed internally");
+            return (
+                self.0,
+                Json(serde_json::json!({"error": "service unavailable; retry later"})),
+            )
+                .into_response();
+        }
         (self.0, Json(serde_json::json!({"error": self.1}))).into_response()
     }
 }
@@ -164,6 +177,7 @@ impl IntoResponse for WebError {
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing_subscriber::fmt()
+        .with_ansi(false)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
     let config_path = std::env::var_os("GGFM_PATCHER_CONFIG")
@@ -175,6 +189,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     fs::create_dir_all(&config.cache_root)?;
     fs::create_dir_all(&config.work_root)?;
     let address: SocketAddr = config.listen.parse()?;
+    let security = security::Security::new(config.security.clone())?;
+    security.validate_listen(address)?;
     let deployment_fingerprint = deployment_fingerprint(&config)?;
     let mut state = AppState {
         config: Arc::new(config),
@@ -193,9 +209,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/prebuilt/challenge", post(issue_challenge))
         .route("/api/v1/prebuilt/prove", post(prove_challenge))
         .route("/api/v1/download/{token}", get(download))
-        .with_state(state);
+        .with_state(state)
+        .layer(axum::middleware::from_fn_with_state(
+            security,
+            security::protect,
+        ));
     let listener = tokio::net::TcpListener::bind(address).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -323,7 +347,7 @@ async fn index() -> Response {
         [
             (
                 header::CONTENT_SECURITY_POLICY,
-                "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'",
+                "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
             ),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::CACHE_CONTROL, "no-store"),
@@ -382,16 +406,27 @@ async fn patch_upload(
         // or remove a source still being read by the blocking pipeline.
         let _permit = permit;
         let _upload = temp;
+        verify_xapk(
+            &source_for_job,
+            &state_for_job.compatibility,
+            Limits::default(),
+        )
+        .map_err(|_| {
+            WebError(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "unsupported or invalid XAPK".into(),
+            )
+        })?;
         build_or_reuse(
             &state_for_job,
             &source_for_job,
             application_id.as_deref(),
             state_for_job.config.versions.revision,
         )
+        .map_err(internal)
     })
     .await
-    .map_err(internal)?
-    .map_err(|error| WebError(StatusCode::UNPROCESSABLE_ENTITY, error))?;
+    .map_err(internal)??;
     grant_download(&state, result.0, result.1).await
 }
 
@@ -453,9 +488,17 @@ async fn prove_challenge(
         })?;
     challenge
         .verify(&request.proof, unix_now())
-        .map_err(|error| WebError(StatusCode::UNAUTHORIZED, error.to_string()))?;
+        .map_err(proof_error)?;
     verify_prepared_metadata(prebuilt)?;
     grant_download(&state, prebuilt.cache_key.clone(), prebuilt.output.clone()).await
+}
+
+fn proof_error(error: ChallengeError) -> WebError {
+    let status = match error {
+        ChallengeError::Expired => StatusCode::GONE,
+        _ => StatusCode::UNAUTHORIZED,
+    };
+    WebError(status, error.to_string())
 }
 
 async fn download(
@@ -672,6 +715,15 @@ fn internal(error: impl std::fmt::Display) -> WebError {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn normal_proof_expiry_is_not_an_authentication_failure() {
+        assert_eq!(proof_error(ChallengeError::Expired).0, StatusCode::GONE);
+        assert_eq!(
+            proof_error(ChallengeError::ProofMismatch).0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
 
     fn test_state(dir: &Path) -> AppState {
         let mut config: Config =

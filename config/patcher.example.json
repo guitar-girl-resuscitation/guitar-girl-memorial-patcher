@@ -1,5 +1,21 @@
 {
   "listen": "127.0.0.1:8080",
+  "security": {
+    "publicOrigin": "https://patch.example.org",
+    "trustedProxies": ["127.0.0.1/32", "::1/128"],
+    "clientIpHeader": "cf-connecting-ip",
+    "requireTrustedProxy": true,
+    "requestsPerMinute": 60,
+    "apiPerMinute": 20,
+    "uploadsPerTenMinutes": 2,
+    "downloadsPerTenMinutes": 4,
+    "failuresBeforeBan": 8,
+    "failureWindowSeconds": 600,
+    "banSeconds": 900,
+    "maxTrackedIps": 8192,
+    "maxInFlight": 32,
+    "maxInFlightPerIp": 4
+  },
   "applicationId": "org.guitargirlresuscitation.memorial.selfhosted",
   "compatibilityManifest": "C:/ggfm/patch/compatibility/8.0.0.json",
   "cacheRoot": "C:/ggfm/private/cache",

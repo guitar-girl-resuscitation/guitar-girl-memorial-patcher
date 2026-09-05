@@ -13,7 +13,7 @@ import sys
 
 ALLOWED_SUFFIXES = {".rs", ".toml", ".lock", ".json", ".md", ".txt", ".h", ".hpp",
                     ".cpp", ".c", ".java", ".py", ".mjs", ".html", ".kts", ".xml",
-                    ".yml", ".yaml", ".sh", ".ps1", ".sql"}
+                    ".yml", ".yaml", ".sh", ".ps1", ".sql", ".service"}
 ALLOWED_NAMES = {"LICENSE", "NOTICE", "CMakeLists.txt", ".gitignore", ".gitmodules",
                  ".gitattributes", "Dockerfile"}
 FORBIDDEN_PARTS = {"reverse", "split_extract", "analysis", "captures", "saves",

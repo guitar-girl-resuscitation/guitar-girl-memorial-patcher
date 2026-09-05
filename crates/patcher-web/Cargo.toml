@@ -10,6 +10,7 @@ ggfm-patcher-core = { path = "../patcher-core" }
 futures-util.workspace = true
 getrandom.workspace = true
 hex.workspace = true
+ipnet = { version = "2", features = ["serde"] }
 serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
@@ -21,3 +22,4 @@ tracing-subscriber.workspace = true
 
 [dev-dependencies]
 base64.workspace = true
+tower = { version = "0.5", features = ["util"] }

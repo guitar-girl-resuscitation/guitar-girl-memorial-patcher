@@ -39,12 +39,21 @@ jobs:
         run: |
           cargo test --workspace --locked -j2
           node tools/test-browser-sha256.mjs
+          python tools/test_deployment.py
           cd patch
           python -m unittest discover -s tests -v
       - name: Compile CLI and web service
         run: cargo build --workspace --locked --release -j2
       - name: Package original software only
-        run: python tools/release_artifacts.py pack --kind patcher-linux-x64 --file ggfm-patcher=target/release/ggfm-patcher --file ggfm-patcher-web=target/release/ggfm-patcher-web --file patcher.example.json=config/patcher.example.json --file DEPLOYMENT.md=docs/DEPLOYMENT.md
+        run: >-
+          python tools/release_artifacts.py pack --kind patcher-linux-x64
+          --file ggfm-patcher=target/release/ggfm-patcher
+          --file ggfm-patcher-web=target/release/ggfm-patcher-web
+          --file patcher.example.json=config/patcher.example.json
+          --file DEPLOYMENT.md=docs/DEPLOYMENT.md
+          --file PUBLIC_DEPLOYMENT.md=docs/PUBLIC_DEPLOYMENT.md
+          --file deploy/cloudflared.yml=deploy/cloudflared.yml
+          --file deploy/ggfm-patcher.service=deploy/ggfm-patcher.service
       - uses: actions/upload-artifact@v4
         with:
           name: patcher-release

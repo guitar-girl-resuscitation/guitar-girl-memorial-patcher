@@ -31,3 +31,11 @@ split certificates, bounded tool execution and workspace disk quotas.
 Temporary workspaces are request-scoped. Signing material is accepted only by
 path and environment variables and is never copied into cache or repository.
 See `docs/DEPLOYMENT.md`.
+
+For public hosting, read [PUBLIC_DEPLOYMENT.md](docs/PUBLIC_DEPLOYMENT.md)
+before enabling Cloudflare Tunnel (the only supported public ingress). The web service includes bounded per-IP rate
+limits, failure bans, trusted-proxy IP resolution and non-cacheable API/download
+responses. `deploy/` contains Cloudflare Tunnel and systemd templates for operator
+review; no workflow installs them onto a live host. Failure-to-ban is built in,
+without an OS Fail2ban daemon. Full uploads must fit Cloudflare's size/time limits;
+use operator-prebuilt mode when they do not.

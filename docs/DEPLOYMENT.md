@@ -1,5 +1,10 @@
 # Deployment and release contract
 
+Public deployments also require the configuration and verification checklist
+in [PUBLIC_DEPLOYMENT.md](PUBLIC_DEPLOYMENT.md). The example now assumes a local
+Cloudflare Tunnel connector and `https://patch.example.org`; replace that origin. For
+loopback-only development, omit `security` to use the safe direct-peer defaults.
+
 ## Patch reference
 
 The release checkout must expose the Patch repository at `patch/` and pin a
@@ -68,9 +73,9 @@ Nightly label cannot accidentally reuse an older build.
    restart. Otherwise omit `prebuilt` or leave that path absent. Neither the
    source nor a prepatched XAPK is supplied by this project.
 
-The service listens on loopback by default. Put a TLS reverse proxy in front
-of it with a 768 MiB upload ceiling, streaming requests, suitable build timeouts,
-and per-client request limits. Use a dedicated nonprivileged worker account
+The service listens only on loopback. Public ingress is Cloudflare Tunnel only;
+follow PUBLIC_DEPLOYMENT.md for cache rules, visitor identity and the important
+Cloudflare full-upload size/timeout restrictions. Use a dedicated nonprivileged worker account
 and a filesystem/container disk quota. Cache and temporary directories are
 private; manage old deployment caches explicitly, never expose them as static
 downloads. One process per deployment is required for the single-worker limit.
