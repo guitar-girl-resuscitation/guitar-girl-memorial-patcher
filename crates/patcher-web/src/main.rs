@@ -93,6 +93,7 @@ struct VersionConfig {
     patch_version: String,
     server_version: String,
     server_abi: u32,
+    #[serde(default)]
     revision: u32,
 }
 
@@ -136,6 +137,7 @@ struct Health {
     prebuilt_enabled: bool,
     source_version: String,
     source_sha256: String,
+    android_version: ggfm_patcher_core::AndroidVersion,
 }
 
 #[derive(Serialize)]
@@ -182,7 +184,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
     let config_path = std::env::var_os("GGFM_PATCHER_CONFIG")
         .ok_or("GGFM_PATCHER_CONFIG must name the deployment configuration")?;
-    let config: Config = serde_json::from_slice(&fs::read(config_path)?)?;
+    let mut config: Config = serde_json::from_slice(&fs::read(config_path)?)?;
+    let version = ggfm_patcher_core::AndroidVersion::resolve(config.versions.revision)?;
+    config.versions.revision = version.revision;
+    tracing::info!(version_code = version.version_code, version_name = %version.version_name, "Android release identity resolved");
     validate_release_patch_checkout(&config)?;
     pipeline(&config).validate_artifacts()?;
     let compatibility = CompatibilityManifest::parse(&fs::read(&config.compatibility_manifest)?)?;
@@ -339,6 +344,8 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         prebuilt_enabled: state.prebuilt.is_some(),
         source_version: state.compatibility.source.version.clone(),
         source_sha256: state.compatibility.source.xapk_sha256.clone(),
+        android_version: ggfm_patcher_core::AndroidVersion::resolve(state.config.versions.revision)
+            .expect("version validated before serving"),
     })
 }
 
@@ -739,6 +746,10 @@ mod tests {
         config.work_root = dir.join("work");
         config.cache_root = dir.join("cache");
         config.prebuilt = None;
+        config.versions.revision = ggfm_patcher_core::AndroidVersion::resolve(0)
+            .or_else(|_| ggfm_patcher_core::AndroidVersion::resolve(1))
+            .unwrap()
+            .revision;
         fs::create_dir_all(&config.work_root).unwrap();
         fs::create_dir_all(&config.cache_root).unwrap();
         AppState {

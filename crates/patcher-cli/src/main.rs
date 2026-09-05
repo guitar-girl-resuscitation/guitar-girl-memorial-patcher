@@ -18,6 +18,8 @@ struct Arguments {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Print the immutable Android version embedded in this release (JSON).
+    Version,
     Hash {
         path: PathBuf,
     },
@@ -103,12 +105,17 @@ struct PatchArguments {
     signer_fingerprint: String,
     #[arg(long)]
     application_id: Option<String>,
-    #[arg(long, default_value_t = 1)]
+    /// Zero uses the compiled release; explicit values are for unnumbered local builds.
+    #[arg(long, default_value_t = 0)]
     revision: u32,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     match Arguments::parse().command {
+        Command::Version => println!(
+            "{}",
+            serde_json::to_string(&ggfm_patcher_core::AndroidVersion::resolve(0)?)?
+        ),
         Command::Hash { path } => println!("{}", sha256_file(&path)?),
         Command::Verify { xapk, manifest } => {
             let manifest = load_manifest(&manifest)?;

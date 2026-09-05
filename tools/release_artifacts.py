@@ -15,10 +15,30 @@ KINDS = {
     "server-linux-x64": {"ggfm-server", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "server-windows-x64": {"ggfm-server.exe", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "patch-android-arm64": {"classes.dex", "libggfm_bootstrap.so", "libdobby.so", "memorial-policy.v1.json", "DOBBY-LICENSE", "dependencies.json"},
-    "patcher-linux-x64": {"ggfm-patcher", "ggfm-patcher-web", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
-    "patcher-windows-x64": {"ggfm-patcher.exe", "ggfm-patcher-web.exe", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
+    "patcher-linux-x64": {"ggfm-patcher", "ggfm-patcher-web", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "VERSIONING.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
+    "patcher-windows-x64": {"ggfm-patcher.exe", "ggfm-patcher-web.exe", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "VERSIONING.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
 }
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def validate_android_version(value, expected_revision=None):
+    revision = value.get("revision")
+    if type(revision) is not int or not 1 <= revision <= 2_099_200_000:
+        raise ValueError("invalid Android release revision")
+    if value != {"revision": revision, "versionCode": 800_000 + revision,
+                 "versionName": f"8.0.0-memorial.{revision}"}:
+        raise ValueError("inconsistent Android release identity")
+    if expected_revision is not None and revision != int(expected_revision):
+        raise ValueError("compiled Android revision differs from release workflow")
+    return value
+
+
+def newer_android_release_exists(releases, version_code):
+    for release in releases:
+        previous = re.search(r"(?m)^Android versionCode: ([0-9]+)$", release.get("body") or "")
+        if previous and int(previous[1]) > version_code:
+            return True
+    return False
 
 def output(*args):
     return subprocess.check_output(list(args), cwd=ROOT, text=True).strip()
@@ -50,6 +70,11 @@ def pack(kind, files, destination):
         "files": {name: {"sha256": digest(path), "size": path.stat().st_size}
                   for name, path in sorted(members.items())},
     }
+    if kind.startswith("patcher-"):
+        executable = members["ggfm-patcher.exe" if "windows" in kind else "ggfm-patcher"]
+        metadata["androidVersion"] = validate_android_version(
+            json.loads(output(str(executable), "version")),
+            os.environ.get("GGFM_BUILD_REVISION"))
     destination.mkdir(parents=True, exist_ok=True)
     archive = destination / f"ggfm-{kind}.zip"
     with zipfile.ZipFile(archive, "x", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as z:
@@ -77,6 +102,8 @@ def verify_archive(path, commit=None):
             raise ValueError("invalid source commit")
         if commit and metadata["sourceCommit"] != commit:
             raise ValueError("release built from a different commit")
+        if metadata["kind"].startswith("patcher-"):
+            validate_android_version(metadata.get("androidVersion", {}))
         for name, entry in metadata["files"].items():
             with z.open(name) as stream:
                 actual = hashlib.file_digest(stream, "sha256").hexdigest().upper()
@@ -92,8 +119,14 @@ def publish(directory, tag):
     assets = sorted(directory.glob("*.zip"))
     if not assets:
         raise SystemExit("no compiled artifacts")
+    android_version = None
     for archive in assets:
-        verify_archive(archive, commit)
+        metadata = verify_archive(archive, commit)
+        if metadata["kind"].startswith("patcher-"):
+            version = validate_android_version(metadata["androidVersion"], os.environ["GGFM_BUILD_REVISION"])
+            if android_version is not None and version != android_version:
+                raise SystemExit("release archives disagree on Android version")
+            android_version = version
         if archive.with_suffix(".zip.sha256").read_text(encoding="ascii").split()[0] != digest(archive):
             raise SystemExit("archive checksum mismatch")
     flags = []
@@ -105,6 +138,11 @@ def publish(directory, tag):
             return
         # Only this explicitly replaceable release is ever deleted.
         releases = json.loads(output("gh", "api", f"repos/{repo}/releases?per_page=100"))
+        # A re-run of an older workflow on the same commit must not downgrade
+        # the current Nightly. Compare our machine-readable published code.
+        if android_version and newer_android_release_exists(releases, android_version["versionCode"]):
+            print("Skipping obsolete Nightly: a higher Android version is already published.")
+            return
         if any(r["tag_name"] == "nightly" for r in releases):
             subprocess.run(["gh", "release", "delete", "nightly", "--repo", repo,
                             "--yes", "--cleanup-tag"], check=True, cwd=ROOT)
@@ -117,6 +155,10 @@ def publish(directory, tag):
              "decompiled code, saves or signing keys are included.\n\n"
              f"Exact source: {commit}\nEach archive includes a file-level SHA-256 manifest. "
              "Obtain the original game separately; these archives are not installable game packages.")
+    if android_version:
+        notes += (f"\n\nAndroid versionCode: {android_version['versionCode']}\n"
+                  f"Android versionName: {android_version['versionName']}\n"
+                  "Keep the deployment signing key and application ID for in-place updates.")
     subprocess.run(["gh", "release", "create", tag, "--repo", repo, "--target", commit,
                     "--title", "Nightly" if tag == "nightly" else tag, "--notes", notes,
                     *flags, *map(str, assets),

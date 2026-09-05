@@ -52,8 +52,7 @@
     "patchCommit": "REPLACE_WITH_40_HEX_GIT_COMMIT",
     "patchVersion": "0.1.0",
     "serverVersion": "0.1.0",
-    "serverAbi": 1,
-    "revision": 1
+    "serverAbi": 1
   },
   "prebuilt": {
     "operatorSourceXapk": "C:/ggfm/private/operator-source/Guitar Girl_8.0.0_APKPure.xapk"

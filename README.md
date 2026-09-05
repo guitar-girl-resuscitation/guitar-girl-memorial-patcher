@@ -124,6 +124,14 @@ A chunk challenge checks possession, not copyright permission. Operators must se
 
 ## Releases and upstream updates
 
+Android versions come from the release build: workflow run N produces
+`versionCode = 800000 + N` and `8.0.0-memorial.N`. New runs increase the version;
+re-runs and repeated downloads retain it. Omit `versions.revision` in deployment
+config (remove an old fixed `1`); mismatching overrides fail closed. Inspect
+`ggfm-patcher version`, `/healthz` or the release manifest for the actual version.
+Keep the same package ID and signing key for in-place Android updates. See
+[versioning and local builds](docs/VERSIONING.md). This is not an in-game auto-updater.
+
 [Releases](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher/releases) provide `ggfm-patcher-linux-x64.zip` and its SHA-256 file. Successful main builds replace the single Nightly; version tags create versioned releases. Archives contain packaging tools, not game packages or private keys.
 
 The upstream-update workflow runs every six hours or manually. It verifies a published Patch release, updates only the pinned gitlink and dependency record, tests the change, then dispatches a new build. It does **not** update a running deployment, replace a signing key or install anything on a player's phone. Operators deploy matched versions deliberately.

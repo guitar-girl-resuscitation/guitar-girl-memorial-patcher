@@ -82,6 +82,12 @@ downloads. One process per deployment is required for the single-worker limit.
 
 ## Upstream updates
 
+Android build numbering is automatic in compiled releases. Omit
+`versions.revision` (remove the former fixed `1`) and let the embedded workflow
+revision select the output version. Conflicting values fail before serving.
+Preserve your application ID and keystore across updates. See
+[VERSIONING.md](VERSIONING.md) for release/re-run semantics and local builds.
+
 `Update verified Patch release` checks every six hours and can be run manually.
 It accepts only a published Patch runtime whose digest and source commit match
 the upstream Release, updates the gitlink and `config/upstream-patch.json`, runs

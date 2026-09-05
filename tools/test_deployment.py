@@ -5,12 +5,37 @@ import json
 from pathlib import Path
 import unittest
 
-from release_artifacts import KINDS
+from release_artifacts import KINDS, validate_android_version, newer_android_release_exists
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class DeploymentContract(unittest.TestCase):
+    def test_older_rerun_cannot_downgrade_nightly(self):
+        releases = [{"body": None}, {"body": "legacy release"},
+                    {"body": "Notes\nAndroid versionCode: 800042\nAndroid versionName: 8.0.0-memorial.42"}]
+        self.assertTrue(newer_android_release_exists(releases, 800041))
+        self.assertFalse(newer_android_release_exists(releases, 800042))
+        self.assertFalse(newer_android_release_exists(releases, 800043))
+
+    def test_release_revision_is_build_bound_not_fixed_in_config(self):
+        config = json.loads((ROOT / "config/patcher.example.json").read_text())
+        self.assertNotIn("revision", config["versions"])
+        workflow = (ROOT / ".github/workflows/release.yml").read_text()
+        self.assertIn("GGFM_BUILD_REVISION: ${{ github.run_number }}", workflow)
+        self.assertNotIn("github.run_attempt", workflow)
+
+    def test_android_release_metadata_is_consistent(self):
+        value = {"revision": 42, "versionCode": 800042, "versionName": "8.0.0-memorial.42"}
+        self.assertEqual(validate_android_version(value, "42"), value)
+        for bad in [dict(value, revision=0), dict(value, revision=True),
+                    dict(value, versionCode=800001), dict(value, versionName="8.0.0"),
+                    dict(value, revision=2_099_200_001)]:
+            with self.assertRaises(ValueError):
+                validate_android_version(bad)
+        with self.assertRaises(ValueError):
+            validate_android_version(value, "43")
+
     def test_public_example_is_local_cloudflare_only(self):
         config = json.loads((ROOT / "config/patcher.example.json").read_text())
         self.assertEqual(config["listen"], "127.0.0.1:8080")
@@ -51,6 +76,7 @@ class DeploymentContract(unittest.TestCase):
     def test_release_ships_exact_deployment_docs_and_templates(self):
         workflow = (ROOT / ".github/workflows/release.yml").read_text()
         files = {
+            "VERSIONING.md": "docs/VERSIONING.md",
             "PUBLIC_DEPLOYMENT.md": "docs/PUBLIC_DEPLOYMENT.md",
             "deploy/cloudflared.yml": "deploy/cloudflared.yml",
             "deploy/ggfm-patcher.service": "deploy/ggfm-patcher.service",

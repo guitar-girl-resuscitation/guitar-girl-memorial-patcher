@@ -124,6 +124,13 @@ Cloudflare 自身的上传大小和代理超时限制依然生效，Tunnel 不�
 
 ## Release 与上游自动更新
 
+Android 版本绑定发布构建：第 N 次 workflow 运行生成 `versionCode = 800000 + N`
+和 `8.0.0-memorial.N`。新运行递增，重跑同一次运行或重复下载不变。部署配置中
+省略 `versions.revision`（删除旧的固定 `1`），不匹配的覆盖值会直接报错。
+可通过 `ggfm-patcher version`、`/healthz` 或 Release 清单查看实际版本。
+覆盖更新需要保留包名和签名密钥，详见 [版本与本地构建说明](docs/VERSIONING.md)。
+这不是游戏内自动更新器，玩家仍需取得并安装新包。
+
 [Releases](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher/releases) 提供 `ggfm-patcher-linux-x64.zip` 及 SHA-256 文件。main 构建成功后替换唯一 Nightly；标签生成版本化 Release。压缩包只有打包工具，不含游戏或私钥。
 
 上游更新 workflow 每六小时或手动执行：验证已发布的 Patch，更新固定 gitlink 和依赖记录，测试后触发新构建。它**不会**更新正在运行的部署、替换签名密钥或给玩家手机安装应用；部署者应有计划地部署匹配版本。

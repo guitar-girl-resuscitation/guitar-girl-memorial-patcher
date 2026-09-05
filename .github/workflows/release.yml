@@ -12,6 +12,8 @@ concurrency:
   cancel-in-progress: false
 env:
   CARGO_BUILD_JOBS: 2
+  # Stable on re-runs; increases for each new run of this release workflow.
+  GGFM_BUILD_REVISION: ${{ github.run_number }}
 jobs:
   build:
     runs-on: ubuntu-24.04
@@ -52,6 +54,7 @@ jobs:
           --file patcher.example.json=config/patcher.example.json
           --file DEPLOYMENT.md=docs/DEPLOYMENT.md
           --file PUBLIC_DEPLOYMENT.md=docs/PUBLIC_DEPLOYMENT.md
+          --file VERSIONING.md=docs/VERSIONING.md
           --file deploy/cloudflared.yml=deploy/cloudflared.yml
           --file deploy/ggfm-patcher.service=deploy/ggfm-patcher.service
       - uses: actions/upload-artifact@v4

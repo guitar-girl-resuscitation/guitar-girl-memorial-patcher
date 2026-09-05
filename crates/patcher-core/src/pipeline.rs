@@ -57,6 +57,8 @@ pub struct Pipeline {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PipelineError {
+    #[error("invalid Android release version: {0}")]
+    Version(#[from] crate::VersionError),
     #[error("I/O error: {0}")]
     Io(#[from] io::Error),
     #[error("ZIP error: {0}")]
@@ -103,6 +105,7 @@ impl Pipeline {
         output: &Path,
         memorial_revision: u32,
     ) -> Result<(), PipelineError> {
+        let version = crate::AndroidVersion::resolve(memorial_revision)?;
         if output.exists() {
             return Err(PipelineError::OutputExists(output.to_owned()));
         }
@@ -128,8 +131,8 @@ impl Pipeline {
             .map(|split| split.name.as_str())
             .find(|name| *name != "config.arm64_v8a.apk" && *name != "base_assets.apk")
             .ok_or(PipelineError::MissingBase)?;
-        let version_code = 800_000_i64 + i64::from(memorial_revision);
-        let version_name = format!("8.0.0-memorial.{memorial_revision}");
+        let version_code = i64::from(version.version_code);
+        let version_name = version.version_name;
         let unsigned_dir = workspace.path().join("unsigned");
         let signed_dir = workspace.path().join("signed");
         let framework_dir = workspace.path().join("apktool-framework");
