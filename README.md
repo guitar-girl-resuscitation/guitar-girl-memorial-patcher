@@ -1,41 +1,147 @@
 # Guitar Girl Memorial Patcher
 
-A fail-closed CLI and single-worker web patcher for user-supplied,
-hash-verified Guitar Girl packages.
+English · [简体中文](README.zh-CN.md)
 
-The project never publishes or embeds the original game. A user uploads their
-own XAPK, the service verifies its SHA-256 against an explicit compatibility
-allowlist, applies reproducible transforms, changes the application ID and app
-label to **Guitar Girl Fan Memorial Build**, signs the result with a user or
-deployment-specific key, and deletes transient source material.
+A verified CLI and single-worker web patcher for **Guitar Girl Fan Memorial Build**. It turns a supported, user-supplied original XAPK into a standalone memorial package with an embedded Rust server.
 
-An operator may privately provide a known source package to avoid repeated work,
-but it may be selected only after the browser proves possession with a random
-chunk challenge after matching the local SHA-256. The public
-repository contains no source or generated game package.
+This repository and its public Releases contain tools, **not the original or patched game**.
 
-The Rust workspace contains reusable `patcher-core`, a CLI, and a web service
-whose heavy-work semaphore is fixed to one. Release deployments mount the
-Patch repository at `patch/` as a pinned Git submodule. Web deployments require
-a real, clean 40-hex Patch commit; zero-valued development sentinels are rejected.
-Server binaries are release artifacts selected by ABI and SHA-256 and are never
-compiled per user request.
+## The three repositories
 
-No transformation runs until the outer XAPK and every required split match the
-compatibility manifest. Implemented validation covers ZIP path and size limits,
-IL2CPP build-id/prologues, metadata and master-bundle hashes, structured
-master-data transforms, binary manifest assertions, package and authority
-rewriting, ELF SONAME/dependencies, Server/Patch policy agreement, uniform
-split certificates, bounded tool execution and workspace disk quotas.
+| Repository | Responsibility |
+| --- | --- |
+| [Server](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-server) | Rust gameplay, protocol, SQLite saves and the Android server library |
+| [Patch](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patch) | Original client integration, memorial UI, identity isolation and verified transformation rules |
+| [Patcher](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher) | CLI/web packaging, source verification, resource extraction, signing and downloads |
 
-Temporary workspaces are request-scoped. Signing material is accepted only by
-path and environment variables and is never copied into cache or repository.
-See `docs/DEPLOYMENT.md`.
+At runtime, the patched Unity client talks to the embedded Rust server over authenticated loopback. The patching website is **not** a game server and does not need to stay online for play.
 
-For public hosting, read [PUBLIC_DEPLOYMENT.md](docs/PUBLIC_DEPLOYMENT.md)
-before enabling Cloudflare Tunnel (the only supported public ingress). The web service includes bounded per-IP rate
-limits, failure bans, trusted-proxy IP resolution and non-cacheable API/download
-responses. `deploy/` contains Cloudflare Tunnel and systemd templates for operator
-review; no workflow installs them onto a live host. Failure-to-ban is built in,
-without an OS Fail2ban daemon. Full uploads must fit Cloudflare's size/time limits;
-use operator-prebuilt mode when they do not.
+## For players
+
+1. Obtain the supported original package that you are entitled to use. Current support is **8.0.0 / Android ARM64**, identified by the exact SHA-256 below.
+2. Open a trusted deployment or run your own. Select your original XAPK; the browser hashes it locally.
+3. In full-upload mode, upload the validated package and wait for patching. In operator-prebuilt mode, pass the fresh file-possession challenge and download the cached build without uploading the whole package.
+4. Install the resulting XAPK with a compatible split-package installer. All splits belong together; installing only the base APK is insufficient.
+5. Launch **Guitar Girl Fan Memorial Build**, start its local runtime, and play. Root, LSPosed and a separately hosted game server are not required.
+
+```text
+Supported original XAPK SHA-256
+E395AD8A0BF09EA9425D7751388D61C31E9B63411640A716432AC97940BB9FAC
+```
+
+A filename or version label is not sufficient. Unknown hashes and mismatching splits are rejected. The supported input is defined by [Patch's compatibility manifest](patch/compatibility/8.0.0.json), not by an arbitrary package download.
+
+Keep the same application ID and signing certificate for updates that preserve installed data. Another deployment's key/package may create a separate app or be unable to update your installation. Export saves before uninstalling; do not assume official/experimental saves are compatible.
+
+## Packaging pipeline
+
+```text
+User XAPK
+  → whole-file / split / structure verification
+  → private extraction and master.sqlite generation
+  → verified Patch transforms + precompiled Server/runtime injection
+  → application ID, label and split metadata rewrite
+  → zipalign + one certificate for every split
+  → final XAPK verification and download
+```
+
+The Rust workspace separates `patcher-core`, the CLI and the web host. `patch/` is a pinned Git submodule, not a copied fork of Patch. Server artifacts are selected by ABI and SHA-256 and are not compiled per visitor.
+
+Checks cover archive traversal/size limits, relevant binary/data fingerprints, transformation preconditions, package identity, policy agreement and split certificates. A failed precondition stops the build.
+
+## Build and basic CLI use
+
+Use Git with submodules, the CI-pinned Rust toolchain (currently 1.96.0), Python 3.11+ and Node.js for browser hashing tests.
+
+```sh
+git clone --recurse-submodules https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher
+cd guitar-girl-memorial-patcher
+git submodule update --init --checkout
+cargo test --workspace --locked -j2
+cargo build --workspace --locked --release -j2
+node tools/test-browser-sha256.mjs
+python tools/test_deployment.py
+```
+
+Linux examples; Windows binaries have an `.exe` suffix:
+
+```sh
+./target/release/ggfm-patcher hash /private/original.xapk
+./target/release/ggfm-patcher verify /private/original.xapk patch/compatibility/8.0.0.json
+./target/release/ggfm-patcher plan --help
+./target/release/ggfm-patcher patch --help
+```
+
+`hash` prints the digest, `verify` checks compatibility, `plan` records a versioned build plan, and `patch` runs the real transformation. The patch command requires explicit runtime/tool paths, hashes and signing configuration; it never silently uses an attached phone.
+
+## Run the web service
+
+Read [deployment setup](docs/DEPLOYMENT.md) and [public hosting requirements](docs/PUBLIC_DEPLOYMENT.md) before publishing a service.
+
+1. Obtain the compiled Patch runtime for the exact clean `patch/` commit. Read its `dependencies.json` and obtain the **matching** Server artifact. Verify every digest and ABI; never mix independently moving Nightlies.
+2. Install Java 21, Android platform/build-tools 35.0.0, a compatible apktool JAR and a private Python environment with `patch/tools/requirements.lock.txt`.
+3. Create a private signing keystore outside the repository/web root. Self-hosters use their own application-ID suffix and certificate. Preserve that key across upgrades.
+4. Copy [config/patcher.example.json](config/patcher.example.json) to a private location. Replace **all** placeholder paths, hashes, versions, signer fingerprint and public origin. The example's Windows paths must be changed on Linux.
+5. Supply the password environment variables named in the config using your service's secret mechanism. Never put passwords into Git or a public command transcript.
+6. Start the service:
+
+```sh
+export GGFM_PATCHER_CONFIG=/srv/ggfm/private/patcher.json
+export RUST_LOG=info
+# Inject GGFM_KEYSTORE_PASSWORD and GGFM_KEY_PASSWORD securely.
+./target/release/ggfm-patcher-web
+```
+
+The service validates dependencies before opening its loopback listener. Use one process and one heavy worker. The public release is a Linux CLI/web archive, not a turnkey Docker image containing the game.
+
+### Two deployment modes
+
+| Mode | Operator provides | Visitor provides | Heavy work |
+| --- | --- | --- | --- |
+| Full upload | Tools, runtime and signer only | Entire matching original XAPK | Once per accepted upload |
+| Operator-prebuilt | Also a private matching original XAPK | Local hash and fresh random file chunks | Once per validated build identity; cached afterward |
+
+Set `prebuilt.operatorSourceXapk` to a private original file to opt into prebuilt mode. The service validates it and prepares/verifies the output at startup. Without a usable operator source it falls back to full uploads.
+
+The possession challenge uses eight random 64 KiB ranges, expires after three minutes and is single-use. The resulting download token lasts ten minutes and is single-use. Reporting a known public hash alone is not enough.
+
+Cache identity includes source, exact Patch/Server versions and hashes, policy, application ID, signer and relevant tooling. Source/cache files must remain immutable while serving; replace them through a deliberate deployment restart. Never expose source, work, cache or signing directories as static files. Cached output contains game assets and must not be uploaded to GitHub.
+
+### Public ingress, limits and failure bans
+
+The repository's supported public configuration uses a **local Cloudflare Tunnel** connector. It trusts visitor identity only from explicitly trusted local proxy addresses. Keep the origin inaccessible directly and follow the deployment document's origin/cache checks.
+
+- Per-IP request/API/upload/download limits and global/per-IP in-flight limits.
+- Eight qualifying failures within ten minutes trigger a fifteen-minute in-process ban. This is not an OS Fail2ban daemon or a Cloudflare account firewall rule; restarting resets this in-memory state.
+- API/download responses are non-cacheable. Configure Cloudflare cache bypass for the deployment hostname; do not use Cache Everything.
+- One heavy worker; a busy worker rejects new uploads with HTTP 503.
+- Upload: 768 MiB maximum, ten-minute total timeout, thirty-second idle timeout.
+- Archive: 64 entries, 1.5 GiB expanded; per-request work quota 6 GiB; external tool timeout fifteen minutes.
+
+Cloudflare's own upload/body and proxy timeout limits still apply; Tunnel does not bypass them. The supported XAPK exceeds common lower-tier upload limits, so prefer operator-prebuilt mode there. Full uploads need a plan/path that actually accommodates the file and processing time. Chunked upload and asynchronous job submission are not implemented. See the public deployment document before choosing full-upload mode.
+
+A chunk challenge checks possession, not copyright permission. Operators must separately consider whether they may distribute the resulting package.
+
+## Releases and upstream updates
+
+[Releases](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher/releases) provide `ggfm-patcher-linux-x64.zip` and its SHA-256 file. Successful main builds replace the single Nightly; version tags create versioned releases. Archives contain packaging tools, not game packages or private keys.
+
+The upstream-update workflow runs every six hours or manually. It verifies a published Patch release, updates only the pinned gitlink and dependency record, tests the change, then dispatches a new build. It does **not** update a running deployment, replace a signing key or install anything on a player's phone. Operators deploy matched versions deliberately.
+
+## Testing and troubleshooting
+
+- Hash/manifest failure: check the original input; do not disable guards.
+- ABI/policy failure: use the exact runtime pair recorded by Patch.
+- HTTP 503: wait for the single worker; do not start duplicate processes to evade its memory bound.
+- HTTP 413 or proxy timeout: check Cloudflare limits and use prebuilt mode where appropriate.
+- Installation conflict: check package ID and certificate; do not erase saves as a first troubleshooting step.
+
+For an explicitly selected test device, `python tools/smoke-test-android.py output.xapk --serial YOUR_ADB_SERIAL` installs all splits and checks process survival. It does not replace full gameplay acceptance testing.
+
+## Scope, contributions and licensing
+
+This is an unofficial fan memorial/interoperability project, not an official service or an endorsement by the original developers or publisher. It does not recover official accounts, cloud saves, payments or retired online services. Some historical server-only values are memorial compatibility choices, not a claim of complete original-server fidelity.
+
+Project code is licensed under [AGPL-3.0-or-later](LICENSE); third-party components retain their own licenses. This does not license the original game. Supply only an original package you are entitled to use.
+
+Do not submit APK/XAPK files, AssetBundles, original DEX/IL2CPP binaries, full decompiler exports, captured proprietary master tables, private saves or signing secrets. Report bugs with the component version/commit, chapter, reproducible steps and redacted diagnostic logs. For behavior changes, add a contract/regression test and keep both README languages in sync.
