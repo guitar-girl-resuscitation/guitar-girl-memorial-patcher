@@ -10,34 +10,37 @@ def output(*args):
     return subprocess.check_output(args, text=True).strip()
 
 
+def ready(cid):
+    # Docker may allocate a different ephemeral host port after restart.
+    endpoint = "http://" + output("docker", "port", cid, "8080/tcp") + "/healthz"
+    deadline = time.monotonic() + 120
+    last_error = None
+    while time.monotonic() < deadline:
+        try:
+            request = urllib.request.Request(endpoint, headers={"Host": "patch.example.org",
+                                                                 "CF-Connecting-IP": "127.0.0.1"})
+            with urllib.request.urlopen(request, timeout=2) as response:
+                return json.load(response)
+        except (OSError, ValueError) as error:
+            last_error = error
+            if output("docker", "inspect", "--format", "{{.State.Running}}", cid) != "true":
+                raise RuntimeError("smoke container exited") from error
+            time.sleep(2)
+    raise RuntimeError(f"smoke startup timed out at {endpoint}: {last_error}")
+
+
 def main(image):
     cid = output("docker", "run", "--rm", "-d", "--cpus", "2", "--memory", "4g",
                  "--pids-limit", "160", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                  "-p", "127.0.0.1::8080", "-e", "GGFM_PUBLIC_ORIGIN=https://patch.example.org", image)
     try:
-        endpoint = "http://" + output("docker", "port", cid, "8080/tcp") + "/healthz"
-
-        def ready():
-            deadline = time.monotonic() + 120
-            while time.monotonic() < deadline:
-                try:
-                    request = urllib.request.Request(endpoint, headers={"Host": "patch.example.org",
-                                                                         "CF-Connecting-IP": "127.0.0.1"})
-                    with urllib.request.urlopen(request, timeout=2) as response:
-                        return json.load(response)
-                except (OSError, ValueError):
-                    if output("docker", "inspect", "--format", "{{.State.Running}}", cid) != "true":
-                        raise RuntimeError("smoke container exited")
-                    time.sleep(2)
-            raise RuntimeError("smoke startup timed out")
-
-        health = ready()
+        health = ready(cid)
         assert health["ok"] and not health["prebuiltEnabled"]
         version = json.loads(output("docker", "exec", cid, "/opt/ggfm/bin/ggfm-patcher", "version"))
         assert health["androidVersion"] == version
         identity = output("docker", "exec", cid, "cat", "/data/signing/identity.json")
         output("docker", "restart", cid)
-        assert ready()["androidVersion"] == version
+        assert ready(cid)["androidVersion"] == version
         assert output("docker", "exec", cid, "cat", "/data/signing/identity.json") == identity
         print("Docker smoke: upload-only healthy, embedded version verified, signing identity survives restart")
     finally:

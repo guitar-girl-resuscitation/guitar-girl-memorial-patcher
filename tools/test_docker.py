@@ -1,8 +1,12 @@
 """Portable Docker recipe/config contracts, without Docker, network or game files."""
 import importlib.util
+import io
 import json
 from pathlib import Path
 import unittest
+from unittest.mock import patch
+
+import smoke_docker
 
 from release_artifacts import KINDS
 
@@ -13,6 +17,17 @@ spec.loader.exec_module(prepare)
 
 
 class DockerContract(unittest.TestCase):
+    def test_smoke_rediscovers_host_port_after_restart(self):
+        urls = []
+        def open_response(request, timeout):
+            urls.append(request.full_url)
+            return io.StringIO('{"ok":true}')
+        with patch.object(smoke_docker, "output", side_effect=["127.0.0.1:31001", "127.0.0.1:31002"]), \
+             patch.object(smoke_docker.urllib.request, "urlopen", side_effect=open_response):
+            self.assertTrue(smoke_docker.ready("synthetic-container")["ok"])
+            self.assertTrue(smoke_docker.ready("synthetic-container")["ok"])
+        self.assertEqual(urls, ["http://127.0.0.1:31001/healthz", "http://127.0.0.1:31002/healthz"])
+
     def config(self):
         names = ["classes.dex", "libggfm_bootstrap.so", "libdobby.so", "libggfm_server.so"]
         manifest = {"files": {name: {"sha256": "A" * 64} for name in names}}
