@@ -6,7 +6,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Explicit inputs: never COPY the operator's work directory or original package.
 COPY ggfm-patcher ggfm-patcher-web classes.dex libggfm_bootstrap.so libdobby.so libggfm_server.so /opt/ggfm/bundle/
 COPY dependencies.json docker-lock.json release-manifest.json LICENSE DOBBY-LICENSE THIRD_PARTY_TERMINAL_FONT.md /opt/ggfm/bundle/
-COPY prepare.py entrypoint.py healthcheck.py /opt/ggfm/docker/
+COPY prepare.py entrypoint.py healthcheck.py run_managed.py /opt/ggfm/docker/
 RUN python3 /opt/ggfm/docker/prepare.py \
     && python3 -m venv /opt/ggfm/venv \
     && /opt/ggfm/venv/bin/pip install --no-cache-dir --only-binary=:all: --no-binary=tpk_ar -r /opt/ggfm/patch/tools/requirements.lock.txt \

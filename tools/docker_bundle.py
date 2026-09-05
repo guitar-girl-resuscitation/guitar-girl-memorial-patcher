@@ -15,18 +15,18 @@ def main():
     runtime = args.runtime.resolve()
     work = ROOT / "build/docker-context"
     work.mkdir(parents=True, exist_ok=False)
-    commit = subprocess.check_output(["git", "-C", str(ROOT / "patch"), "rev-parse", "HEAD"], text=True).strip()
+    runtime_lock = json.loads((runtime / "runtime-lock.json").read_text())
+    commit = runtime_lock["patchCommit"]
     dependencies = json.loads((runtime / "dependencies.json").read_text())
-    policy = digest(ROOT / "patch/policy/memorial-policy.v1.json")
+    policy = digest(runtime / "memorial-policy.v1.json")
     if policy != dependencies["policySha256"] or digest(runtime / "libggfm_server.so") != dependencies["server"]["sha256"]:
         raise ValueError("Docker runtime pair/policy mismatch")
-    server_archive = runtime / "ggfm-server-android-arm64.zip"
-    metadata = verify_archive(server_archive)
-    if metadata["sourceCommit"] != dependencies["server"]["sourceCommit"]:
-        raise ValueError("Server source mismatch")
-    notice = work / "THIRD_PARTY_TERMINAL_FONT.md"
-    with zipfile.ZipFile(server_archive) as z:
-        notice.write_bytes(z.read("THIRD_PARTY_TERMINAL_FONT.md"))
+    if digest(runtime / "release.zip").lower() != runtime_lock["archiveSha256"]:
+        raise ValueError("Runtime archive changed")
+    metadata = verify_archive(runtime / "release.zip")
+    if metadata["sourceCommit"] != commit:
+        raise ValueError("Runtime source mismatch")
+    notice = runtime / "THIRD_PARTY_TERMINAL_FONT.md"
     lock = work / "docker-lock.json"
     lock.write_text(json.dumps({"schema": 1, "patchCommit": commit, "policySha256": policy}, indent=2))
     files = {name: ROOT / "docker" / name for name in ("Dockerfile", "prepare.py", "entrypoint.py", "healthcheck.py")}
@@ -34,6 +34,7 @@ def main():
                                                    "libggfm_server.so", "dependencies.json", "DOBBY-LICENSE")})
     files.update({name: ROOT / "target/release" / name for name in ("ggfm-patcher", "ggfm-patcher-web")})
     files.update({"docker-lock.json": lock, "THIRD_PARTY_TERMINAL_FONT.md": notice,
+                  "run_managed.py": ROOT / "deploy/run_managed.py",
                   "README.md": ROOT / "docker/README.md", "README.zh-CN.md": ROOT / "docker/README.zh-CN.md",
                   "VERSIONING.md": ROOT / "docs/VERSIONING.md"})
     pack("patcher-docker-linux-amd64", [f"{name}={path}" for name, path in files.items()], ROOT / "dist")

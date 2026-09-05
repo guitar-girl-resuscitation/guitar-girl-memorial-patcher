@@ -1,9 +1,11 @@
 """Portable Docker recipe/config contracts, without Docker, network or game files."""
 import importlib.util
+import ast
 import io
 import json
 from pathlib import Path
 import unittest
+import tempfile
 from unittest.mock import patch
 
 import smoke_docker
@@ -17,6 +19,28 @@ spec.loader.exec_module(prepare)
 
 
 class DockerContract(unittest.TestCase):
+    def test_missing_deployed_signer_fails_before_generating_any_files(self):
+        # Load the pure guard without importing Linux-only fcntl on Windows.
+        tree = ast.parse((ROOT / "docker/entrypoint.py").read_text())
+        guard = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "validate_signing_files")
+        namespace = {}
+        exec(compile(ast.Module(body=[guard], type_ignores=[]), "signing-guard", "exec"), namespace)
+        with tempfile.TemporaryDirectory() as scratch:
+            paths = [Path(scratch) / name for name in ("key", "password", "identity")]
+            for bits in range(8):
+                for index, path in enumerate(paths):
+                    if bits & (1 << index):
+                        path.touch()
+                    elif path.exists():
+                        path.unlink()
+                valid = bits in (0, 3, 7)
+                if valid:
+                    namespace["validate_signing_files"](*paths)
+                else:
+                    with self.assertRaises(RuntimeError):
+                        namespace["validate_signing_files"](*paths)
+                self.assertEqual([p.exists() for p in paths], [bool(bits & (1 << i)) for i in range(3)])
+
     def test_smoke_rediscovers_host_port_after_restart(self):
         urls = []
         def open_response(request, timeout):

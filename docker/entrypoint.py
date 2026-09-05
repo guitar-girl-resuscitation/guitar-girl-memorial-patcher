@@ -17,6 +17,14 @@ CONFIG = DATA / "runtime/patcher.json"
 stopping = False
 
 
+def validate_signing_files(keystore, password_file, identity_file):
+    # A partially lost data volume must never silently create a new signer.
+    if not keystore.exists() and (password_file.exists() or identity_file.exists()):
+        raise RuntimeError("signing keystore missing; restore the original key, do not regenerate")
+    if keystore.exists() and not password_file.exists():
+        raise RuntimeError("signing password missing; restore the data volume, do not regenerate a key")
+
+
 def log(message):
     print(f"[GGFM] {message}", flush=True)
 
@@ -62,8 +70,8 @@ def main():
         config["artifacts"]["patchRoot"] = "/opt/ggfm/patch"
         password_file = DATA / "signing/password"
         keystore = DATA / "signing/memorial.p12"
-        if keystore.exists() and not password_file.exists():
-            raise RuntimeError("signing password missing; restore the data volume, do not regenerate a key")
+        identity_file = DATA / "signing/identity.json"
+        validate_signing_files(keystore, password_file, identity_file)
         if not password_file.exists():
             with password_file.open("x") as stream:
                 stream.write(secrets.token_urlsafe(48))
@@ -85,7 +93,6 @@ def main():
             "org.guitargirlresuscitation.memorial.selfhosted.k" + fingerprint[:12].lower())
         if not re.fullmatch(r"org\.guitargirlresuscitation\.memorial\.[a-z][a-z0-9_.]*", app_id):
             raise ValueError("GGFM_APPLICATION_ID must be a memorial self-hosted package suffix")
-        identity_file = DATA / "signing/identity.json"
         identity = {"applicationId": app_id, "fingerprint": fingerprint}
         if identity_file.exists():
             if json.loads(identity_file.read_text()) != identity:
@@ -110,7 +117,9 @@ def main():
         signal.signal(signal.SIGTERM, terminate)
         signal.signal(signal.SIGINT, terminate)
         try:
-            server = subprocess.Popen(["/opt/ggfm/bin/ggfm-patcher-web"], env=env, start_new_session=True)
+            server = subprocess.Popen(["/opt/ggfm/venv/bin/python", "/opt/ggfm/docker/run_managed.py",
+                "--config", str(CONFIG), "--binary", "/opt/ggfm/bin/ggfm-patcher-web",
+                "--state", str(DATA / "updates")], env=env, start_new_session=True)
             children.append(server)
             deadline = time.monotonic() + 3600
             while not stopping:
@@ -140,7 +149,7 @@ def main():
                     os.killpg(child.pid, signal.SIGTERM)
             for child in children:
                 try:
-                    child.wait(timeout=15)
+                    child.wait(timeout=3600)
                 except subprocess.TimeoutExpired:
                     os.killpg(child.pid, signal.SIGKILL)
                     child.wait()

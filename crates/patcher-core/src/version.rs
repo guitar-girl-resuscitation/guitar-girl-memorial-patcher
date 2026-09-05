@@ -1,4 +1,4 @@
-//! Android release identity is fixed at build time, never at download/startup time.
+//! Android identity is fixed per compiled release or persisted deployment generation.
 use serde::Serialize;
 
 const BASE_CODE: u32 = 800_000;
@@ -27,6 +27,20 @@ pub enum VersionError {
 }
 
 impl AndroidVersion {
+    /// A persistent deployment counter also advances when only Patch changes.
+    /// It may not relabel a binary below its compiled release revision.
+    pub fn deployment(configured: u32, revision: Option<u32>) -> Result<Self, VersionError> {
+        let base = Self::resolve(configured)?;
+        match revision {
+            None => Ok(base),
+            Some(value) if value >= base.revision => Self::resolve_with(value, 0),
+            Some(value) => Err(VersionError::Conflict {
+                configured: value,
+                compiled: base.revision,
+            }),
+        }
+    }
+
     /// Zero means automatic. Numbered releases cannot be relabelled by old config.
     pub fn resolve(configured: u32) -> Result<Self, VersionError> {
         let compiled = env!("GGFM_COMPILED_REVISION")
@@ -111,6 +125,25 @@ mod tests {
         );
         assert_eq!(
             AndroidVersion::resolve_with(u32::MAX, 0),
+            Err(VersionError::OutOfRange)
+        );
+    }
+
+    #[test]
+    fn deployment_revision_has_a_floor_and_remains_stable() {
+        let compiled: u32 = env!("GGFM_COMPILED_REVISION").parse().unwrap();
+        let configured = if compiled == 0 { 8 } else { 0 };
+        let base = AndroidVersion::resolve(configured).unwrap();
+        let next = base.revision + 1;
+        let version = AndroidVersion::deployment(configured, Some(next)).unwrap();
+        assert_eq!(version.version_code, BASE_CODE + next);
+        assert_eq!(
+            AndroidVersion::deployment(configured, Some(next)).unwrap(),
+            version
+        );
+        assert!(AndroidVersion::deployment(configured, Some(base.revision - 1)).is_err());
+        assert_eq!(
+            AndroidVersion::deployment(configured, Some(MAX_REVISION + 1)),
             Err(VersionError::OutOfRange)
         );
     }

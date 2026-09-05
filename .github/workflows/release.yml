@@ -43,21 +43,13 @@ jobs:
           node tools/test-browser-sha256.mjs
           python tools/test_deployment.py
           python tools/test_docker.py
+          python tools/test_managed.py
           cd patch
           python -m unittest discover -s tests -v
       - name: Compile CLI and web service
         run: cargo build --workspace --locked --release -j2
-      - uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '21'
-      - uses: android-actions/setup-android@v3
-      - name: Install bounded native build toolchain
-        run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0' 'ndk;27.3.13750724' 'cmake;3.22.1'
-      - name: Build matched standalone runtime from pinned Patch source
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: python patch/tools/build_runtime.py --sdk "$ANDROID_HOME" --java-home "$JAVA_HOME" --output "$GITHUB_WORKSPACE/build/docker-runtime"
+      - name: Fetch verified precompiled Patch and Server runtime
+        run: python tools/fetch_runtime.py --output build/docker-runtime
       - name: Package original software only
         run: >-
           python tools/release_artifacts.py pack --kind patcher-linux-x64
@@ -69,6 +61,7 @@ jobs:
           --file VERSIONING.md=docs/VERSIONING.md
           --file deploy/cloudflared.yml=deploy/cloudflared.yml
           --file deploy/ggfm-patcher.service=deploy/ggfm-patcher.service
+          --file deploy/run_managed.py=deploy/run_managed.py
       - name: Package resource-free Docker deployment context
         run: python tools/docker_bundle.py --runtime build/docker-runtime
       - name: Build Dockerfile and smoke-test upload-only startup

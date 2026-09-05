@@ -32,7 +32,8 @@ def ready(cid):
 def main(image):
     cid = output("docker", "run", "--rm", "-d", "--cpus", "2", "--memory", "4g",
                  "--pids-limit", "160", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-                 "-p", "127.0.0.1::8080", "-e", "GGFM_PUBLIC_ORIGIN=https://patch.example.org", image)
+                 "-p", "127.0.0.1::8080", "-e", "GGFM_PUBLIC_ORIGIN=https://patch.example.org",
+                 "-e", "GGFM_AUTO_UPDATE=0", image)
     try:
         health = ready(cid)
         assert health["ok"] and not health["prebuiltEnabled"]

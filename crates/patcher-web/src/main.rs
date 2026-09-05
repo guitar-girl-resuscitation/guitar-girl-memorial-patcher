@@ -95,6 +95,8 @@ struct VersionConfig {
     server_abi: u32,
     #[serde(default)]
     revision: u32,
+    #[serde(default)]
+    deployment_revision: Option<u32>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -185,8 +187,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config_path = std::env::var_os("GGFM_PATCHER_CONFIG")
         .ok_or("GGFM_PATCHER_CONFIG must name the deployment configuration")?;
     let mut config: Config = serde_json::from_slice(&fs::read(config_path)?)?;
-    let version = ggfm_patcher_core::AndroidVersion::resolve(config.versions.revision)?;
-    config.versions.revision = version.revision;
+    let base = ggfm_patcher_core::AndroidVersion::resolve(config.versions.revision)?;
+    config.versions.revision = base.revision;
+    let version = ggfm_patcher_core::AndroidVersion::deployment(
+        base.revision,
+        config.versions.deployment_revision,
+    )?;
     tracing::info!(version_code = version.version_code, version_name = %version.version_name, "Android release identity resolved");
     validate_release_patch_checkout(&config)?;
     pipeline(&config).validate_artifacts()?;
@@ -207,9 +213,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         deployment_fingerprint,
     };
     state.prebuilt = prepare_operator_source(&state)?.map(Arc::new);
+    if std::env::var_os("GGFM_PREPARE_ONLY").is_some() {
+        tracing::info!(
+            prebuilt = state.prebuilt.is_some(),
+            "deployment preflight complete"
+        );
+        return Ok(());
+    }
     let app = Router::new()
         .route("/", get(index))
         .route("/healthz", get(health))
+        .route("/api/v1/update", get(update_info))
         .route("/api/v1/patch", post(patch_upload))
         .route("/api/v1/prebuilt/challenge", post(issue_challenge))
         .route("/api/v1/prebuilt/prove", post(prove_challenge))
@@ -224,8 +238,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),
     )
+    .with_graceful_shutdown(shutdown_signal())
     .await?;
     Ok(())
+}
+
+async fn shutdown_signal() {
+    #[cfg(unix)]
+    {
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("SIGTERM handler");
+        tokio::select! { _ = terminate.recv() => {}, _ = tokio::signal::ctrl_c() => {} }
+    }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
+    tracing::info!("draining active requests before deployment update");
 }
 
 fn validate_release_patch_checkout(config: &Config) -> Result<(), Box<dyn std::error::Error>> {
@@ -265,6 +293,7 @@ fn deployment_fingerprint(config: &Config) -> Result<String, Box<dyn std::error:
         "artifacts": config.artifacts,
         "versions": config.versions,
         "applicationId": config.application_id,
+        "updateOrigin": config.security.public_origin,
         "signer": config.signing.fingerprint,
         "patcher": sha256_file(&std::env::current_exe()?)?,
         "apktool": sha256_file(&config.tools.apktool_jar)?,
@@ -344,9 +373,28 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         prebuilt_enabled: state.prebuilt.is_some(),
         source_version: state.compatibility.source.version.clone(),
         source_sha256: state.compatibility.source.xapk_sha256.clone(),
-        android_version: ggfm_patcher_core::AndroidVersion::resolve(state.config.versions.revision)
-            .expect("version validated before serving"),
+        android_version: ggfm_patcher_core::AndroidVersion::deployment(
+            state.config.versions.revision,
+            state.config.versions.deployment_revision,
+        )
+        .expect("version validated before serving"),
     })
+}
+
+async fn update_info(State(state): State<AppState>) -> Json<serde_json::Value> {
+    let version = ggfm_patcher_core::AndroidVersion::deployment(
+        state.config.versions.revision,
+        state.config.versions.deployment_revision,
+    )
+    .expect("version validated before serving");
+    Json(serde_json::json!({
+        "schema": 1,
+        "applicationId": state.config.application_id.as_deref()
+            .unwrap_or(&state.compatibility.output.application_id),
+        "signerSha256": state.config.signing.fingerprint,
+        "versionCode": version.version_code,
+        "versionName": version.version_name,
+    }))
 }
 
 async fn index() -> Response {
@@ -564,6 +612,8 @@ fn build_or_reuse(
     };
     let mut plan = PatchPlan::create(&verified, &state.compatibility, &versions, application_id)
         .map_err(|error| error.to_string())?;
+    plan.update_origin = state.config.security.public_origin.clone();
+    plan.deployment_revision = state.config.versions.deployment_revision;
     plan.cache_key = hex::encode_upper(Sha256::digest(
         format!(
             "{}\0{}\0{}",

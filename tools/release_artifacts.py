@@ -14,12 +14,12 @@ KINDS = {
     "patcher-docker-linux-amd64": {"Dockerfile", "prepare.py", "entrypoint.py", "healthcheck.py",
         "docker-lock.json", "ggfm-patcher", "ggfm-patcher-web", "classes.dex",
         "libggfm_bootstrap.so", "libdobby.so", "libggfm_server.so", "dependencies.json",
-        "DOBBY-LICENSE", "THIRD_PARTY_TERMINAL_FONT.md", "README.md", "README.zh-CN.md", "VERSIONING.md"},
+        "DOBBY-LICENSE", "THIRD_PARTY_TERMINAL_FONT.md", "README.md", "README.zh-CN.md", "VERSIONING.md", "run_managed.py"},
     "server-android-arm64": {"libggfm_server.so", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "server-linux-x64": {"ggfm-server", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
     "server-windows-x64": {"ggfm-server.exe", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
-    "patch-android-arm64": {"classes.dex", "libggfm_bootstrap.so", "libdobby.so", "memorial-policy.v1.json", "DOBBY-LICENSE", "dependencies.json"},
-    "patcher-linux-x64": {"ggfm-patcher", "ggfm-patcher-web", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "VERSIONING.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
+    "patch-android-arm64": {"classes.dex", "libggfm_bootstrap.so", "libdobby.so", "libggfm_server.so", "THIRD_PARTY_TERMINAL_FONT.md", "memorial-policy.v1.json", "DOBBY-LICENSE", "dependencies.json"},
+    "patcher-linux-x64": {"ggfm-patcher", "ggfm-patcher-web", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "VERSIONING.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service", "deploy/run_managed.py"},
     "patcher-windows-x64": {"ggfm-patcher.exe", "ggfm-patcher-web.exe", "patcher.example.json", "DEPLOYMENT.md", "PUBLIC_DEPLOYMENT.md", "VERSIONING.md", "deploy/cloudflared.yml", "deploy/ggfm-patcher.service"},
 }
 ROOT = Path(__file__).resolve().parents[1]
@@ -75,6 +75,7 @@ def pack(kind, files, destination):
                   for name, path in sorted(members.items())},
     }
     if kind.startswith("patcher-"):
+        metadata["workerApiVersion"] = 1
         executable = members["ggfm-patcher.exe" if "windows" in kind else "ggfm-patcher"]
         metadata["androidVersion"] = validate_android_version(
             json.loads(output(str(executable), "version")),

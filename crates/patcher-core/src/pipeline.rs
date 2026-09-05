@@ -105,7 +105,8 @@ impl Pipeline {
         output: &Path,
         memorial_revision: u32,
     ) -> Result<(), PipelineError> {
-        let version = crate::AndroidVersion::resolve(memorial_revision)?;
+        let version =
+            crate::AndroidVersion::deployment(memorial_revision, plan.deployment_revision)?;
         if output.exists() {
             return Err(PipelineError::OutputExists(output.to_owned()));
         }
@@ -333,6 +334,17 @@ impl Pipeline {
             .clone();
         let bootstrap_dex_name = next_dex_name(&base)?;
         let patched_base = unsigned_dir.join("base-injected.apk");
+        let update_provenance = workspace.path().join("update-source.json");
+        fs::write(
+            &update_provenance,
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1,
+                "origin": plan.update_origin,
+                "applicationId": plan.application_id,
+                "signerSha256": normalize_fingerprint(&plan.signer_fingerprint),
+                "versionCode": version.version_code,
+            }))?,
+        )?;
         append_zip_entries(
             &base,
             &patched_base,
@@ -343,6 +355,10 @@ impl Pipeline {
                     "assets/ggfm/policy.json".to_owned(),
                 ),
                 (&master, "assets/ggfm/master.sqlite".to_owned()),
+                (
+                    &update_provenance,
+                    "assets/ggfm/update-source.json".to_owned(),
+                ),
                 (
                     &master_transform_report,
                     "assets/ggfm/master-transform-report.json".to_owned(),
@@ -1187,6 +1203,7 @@ fn validate_injected_payloads(
             expected_dex,
             "assets/ggfm/policy.json",
             "assets/ggfm/master.sqlite",
+            "assets/ggfm/update-source.json",
             "assets/ggfm/master-transform-report.json",
         ],
     )?;

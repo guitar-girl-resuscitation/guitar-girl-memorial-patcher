@@ -94,9 +94,70 @@ the upstream Release, updates the gitlink and `config/upstream-patch.json`, runs
 tests/content guards, then commits only those two pins. It explicitly dispatches
 the build workflow after the bot push. A failed check cannot update main.
 
-This updates source/build references, not a running deployment or its signing
-key. Operators deliberately deploy a matched new runtime pair. No APK is ever
-uploaded to GitHub by either workflow.
+That workflow updates source references. The independent Linux deployment
+supervisor also updates running deployments; these are separate mechanisms.
+No APK is ever uploaded to GitHub by either workflow.
+
+### Managed Linux / Docker runtime
+
+Docker starts the stable `run_managed.py` supervisor automatically. For a native
+deployment, install that authored script once alongside the seeded binaries:
+
+```sh
+python3.11 /opt/ggfm/patcher/deploy/run_managed.py \
+  --config /srv/ggfm/patcher.json \
+  --binary /opt/ggfm/patcher/ggfm-patcher-web \
+  --state /srv/ggfm/updates
+```
+
+Use the same private signing-password environment as the ordinary worker. Run
+as a dedicated unprivileged Linux user; the state directory must be writable
+only by that user. The included systemd unit supervises this entry point.
+Keep configuration, source XAPK, signing directory, cache **and update state**
+on persistent storage. Docker uses `/data/updates`; never recreate `/data` when
+updating. Set Docker `--stop-timeout 3600` so an active patch job can drain.
+
+The supervisor checks GitHub at startup and hourly. It verifies immutable asset
+IDs, GitHub SHA-256, every archive member, exact source commits and Server/policy
+pairing. Patch-only changes reuse the worker; worker-only changes reuse the
+runtime. Native libraries are downloaded precompiled, never rebuilt per user.
+Source transformation scripts use a clean, commit-specific Patch checkout.
+A changed Python lock gets its own private environment. Java, Android tools,
+Python and OS dependencies remain the base deployment's responsibility: an
+incompatible worker API is rejected rather than silently upgrading the OS.
+
+Each candidate reserves a monotonically increasing Android revision on disk.
+The worker drains, then the candidate prebuilds the optional operator XAPK.
+Only after prebuild and health checks succeed does the supervisor publish the
+new generation. Failure restarts the previous generation; failed revisions
+are not reused. A change of package ID, signer or origin is rejected on restart.
+There is a maintenance interval during rebuild, not zero-downtime service.
+The immutable generation configuration and last active pair survive restart.
+
+To pause checks, set `GGFM_AUTO_UPDATE=0` (Docker or native), or use
+`--no-updates`. The active generation still runs. No update deletes the old
+signing key, original source or saves. Old generations/caches are retained:
+set a filesystem quota and monitor disk usage; there is no automatic pruning.
+
+`/api/v1/update` advertises only the running generation's version, application
+ID and signer. Packages embed this deployment's validated HTTPS origin. The
+client offers a browser link back to it, never silently downloads/installs or
+uploads saves. A deployment version is allocated per generation, not per user
+download or restart. Keep `versions.revision` unset in numbered releases;
+`versions.deploymentRevision` is owned by the managed supervisor.
+
+### 自动更新（中文）
+
+Docker 默认使用独立入口自动检查 Patcher 与 Patch 的 GitHub 发布。
+仅 Patch 更新时直接复用已编译 worker；仅 Patcher 更新时复用运行时。
+新版先校验哈希与版本，再等待旧任务结束，预构建部署者原包，通过健康检查后
+才启用。失败回退旧版本；期间会有维护窗口。每次有效候选分配持久化的递增
+版本号，不随访客下载或进程重启增加，失败版本号也不复用。
+
+原包、签名密钥、配置、缓存及 `/data/updates` 必须持久化，不能升级时清空。
+用 `GGFM_AUTO_UPDATE=0` 可暂停更新。旧版本与缓存不会自动清理，请配置磁盘
+配额并监控容量。基础系统依赖不兼容时拒绝更新，仍可能需要部署者更新基础镜像。
+游戏内更新提示只返回产出此包的站点，不自动安装，也不会上传玩家存档。
 
 ## Quotas
 

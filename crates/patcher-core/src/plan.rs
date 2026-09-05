@@ -18,6 +18,9 @@ pub struct PatchPlan {
     pub application_label: String,
     pub signer_fingerprint: String,
     pub cache_key: String,
+    /// HTTPS deployment origin, supplied only after web security validation.
+    pub update_origin: Option<String>,
+    pub deployment_revision: Option<u32>,
     pub stages: Vec<&'static str>,
 }
 
@@ -77,6 +80,8 @@ impl PatchPlan {
             application_label: manifest.output.label.clone(),
             signer_fingerprint: artifacts.signer_fingerprint.clone(),
             cache_key,
+            update_origin: None,
+            deployment_revision: None,
             stages: vec![
                 "verify-xapk-and-splits",
                 "extract-request-workspace",

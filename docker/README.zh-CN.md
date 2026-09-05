@@ -19,7 +19,7 @@ docker build --platform linux/amd64 -t ggfm-patcher:local .
 mkdir -p data input
 sudo chown 10001:10001 data
 docker run -d --name ggfm-patcher --restart unless-stopped \
-  --cpus 2 --memory 4g --pids-limit 160 \
+  --cpus 2 --memory 4g --pids-limit 160 --stop-timeout 3600 \
   --security-opt no-new-privileges --cap-drop ALL \
   -p 127.0.0.1:8088:8080 \
   -e GGFM_PUBLIC_ORIGIN=https://patch.example.org \
@@ -99,9 +99,13 @@ Cloudflare 自身请求体大小/超时仍生效，nginx 参数或 Tunnel 不能
 
 ## 更新和持久化
 
-新 Release 自动内嵌递增 Android 版本，不用手改 `revision: 1`，详见
-[VERSIONING.md](VERSIONING.md)。构建新 Release 的 Docker 目录，再替换容器，
-继续挂载**同一个数据目录/卷**，保留公网 origin 与应用包名。
+独立 Python 入口在启动时和每小时检查 GitHub，下载并校验编译好的 worker
+及匹配的 Patch / Server。有预置原包时先重新打包，成功才切换，失败恢复旧版。
+每个候选版本在 `/data/updates` 保留递增 Android 版本号，不随下载或重启增加。
+兼容的更新不需要重新构建 Docker；基础依赖或入口 API 不兼容时仍需更新镜像。
+必须保留**同一个数据目录/卷**、公网 origin 与包名。用 `GGFM_AUTO_UPDATE=0`
+暂停自动检查。停止超时设为一小时，允许正在进行的任务结束。
+旧版本暂不自动清理，请设置磁盘配额并监控可用空间。
 
 升级不要删除 `data/signing`、重新生成密钥，或执行 `docker compose down -v`。
 丢失密钥会使新包无法无缝覆盖安装旧包。默认包名由持久签名证书派生；

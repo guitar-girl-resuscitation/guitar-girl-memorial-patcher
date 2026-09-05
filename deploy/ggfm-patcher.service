@@ -10,20 +10,20 @@ Type=simple
 User=ggfm
 Group=ggfm
 WorkingDirectory=/opt/ggfm/patcher
-ExecStart=/opt/ggfm/bin/ggfm-patcher-web
+ExecStart=/usr/bin/python3 /opt/ggfm/patcher/deploy/run_managed.py --config /etc/ggfm/patcher.json --binary /opt/ggfm/patcher/ggfm-patcher-web --state /srv/ggfm/updates
 Environment=GGFM_PATCHER_CONFIG=/etc/ggfm/patcher.json
 Environment=RUST_LOG=info
 EnvironmentFile=/etc/ggfm/signing.env
 Restart=on-failure
 RestartSec=10
 KillMode=control-group
-TimeoutStopSec=30
+TimeoutStopSec=3600
 UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
-ReadWritePaths=/srv/ggfm/work /srv/ggfm/cache
+ReadWritePaths=/srv/ggfm/work /srv/ggfm/cache /srv/ggfm/updates
 RestrictSUIDSGID=true
 ProtectKernelTunables=true
 ProtectKernelModules=true

@@ -6,6 +6,7 @@ __pycache__/
 .env
 .env.*
 /dist/
+/build/
 .cargo/
 work/
 uploads/

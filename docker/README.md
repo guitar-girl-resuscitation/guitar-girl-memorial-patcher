@@ -20,7 +20,7 @@ docker build --platform linux/amd64 -t ggfm-patcher:local .
 mkdir -p data input
 sudo chown 10001:10001 data
 docker run -d --name ggfm-patcher --restart unless-stopped \
-  --cpus 2 --memory 4g --pids-limit 160 \
+  --cpus 2 --memory 4g --pids-limit 160 --stop-timeout 3600 \
   --security-opt no-new-privileges --cap-drop ALL \
   -p 127.0.0.1:8088:8080 \
   -e GGFM_PUBLIC_ORIGIN=https://patch.example.org \
@@ -105,10 +105,16 @@ No chunked full-upload or asynchronous build API is currently provided.
 
 ## Updates and persistence
 
-A new release embeds a new Android revision automatically; there is no
-`revision: 1` to edit. See [VERSIONING.md](VERSIONING.md). Rebuild the new release's
-Docker context, then replace the container while mounting **the same data
-directory/volume** and keeping the same public origin and application ID.
+The stable Python supervisor checks GitHub on startup and hourly, verifies and
+downloads the precompiled worker and matched Patch/Server runtime, and prebuilds
+the optional original before activation. Failures restore the previous worker.
+An Android revision is reserved per generation in `/data/updates`, not per
+download or restart. No Docker rebuild is needed for compatible runtime/worker
+updates. An incompatible worker API or changed base-system dependency may still
+require a new image. Keep **the same data directory/volume**, public origin and
+application ID. Set `GGFM_AUTO_UPDATE=0` to pause automatic checks.
+Use a one-hour Docker stop timeout so the single heavy task can drain.
+Previous generations are retained; enforce a disk quota and monitor free space.
 
 Never delete `data/signing`, regenerate its key, or use `docker compose down -v`
 as an upgrade step. Loss of the key prevents seamless Android updates.

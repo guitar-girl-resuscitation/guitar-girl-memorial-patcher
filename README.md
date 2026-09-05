@@ -6,6 +6,11 @@ A verified CLI and single-worker web patcher for **Guitar Girl Fan Memorial Buil
 
 This repository and its public Releases contain tools, **not the original or patched game**.
 
+Linux/Docker deployments can now keep a stable supervisor while automatically
+updating the worker and compiled Patch/Server runtime. A preloaded original is
+rebuilt before activating a new generation; signing identity and monotonic
+Android versions persist. See [managed updates](docs/DEPLOYMENT.md#managed-linux--docker-runtime).
+
 ## The three repositories
 
 | Repository | Responsibility |
