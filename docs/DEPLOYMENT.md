@@ -91,8 +91,9 @@ Preserve your application ID and keystore across updates. See
 `Update verified Patch release` checks every six hours and can be run manually.
 It accepts only a published Patch runtime whose digest and source commit match
 the upstream Release, updates the gitlink and `config/upstream-patch.json`, runs
-tests/content guards, then commits only those two pins. It explicitly dispatches
-the build workflow after the bot push. A failed check cannot update main.
+tests/content guards, then commits only those two pins. A pin-only bot push
+does not rebuild the unchanged Patcher: running deployments fetch the new
+verified Patch runtime independently. A failed check cannot update main.
 
 That workflow updates source references. The independent Linux deployment
 supervisor also updates running deployments; these are separate mechanisms.

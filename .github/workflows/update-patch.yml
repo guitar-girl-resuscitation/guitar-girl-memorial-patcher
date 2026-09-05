@@ -37,7 +37,7 @@ jobs:
           python patch/tools/release_guard.py --history
           cd patch
           python -m unittest discover -s tests -v
-      - name: Commit only the validated pin and dispatch build
+      - name: Commit only the validated source pin
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -46,4 +46,5 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git commit -m "Update verified Patch release pin"
           git push origin HEAD:main
-          gh workflow run release.yml --ref main
+          # Deployments fetch the verified Patch runtime independently. A pin-only
+          # bot push must not rebuild the unchanged Patcher/CLI/Docker toolchain.

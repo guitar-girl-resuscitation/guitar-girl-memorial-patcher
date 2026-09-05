@@ -148,6 +148,19 @@ def next_revision(previous, compiled):
     return result
 
 
+def initial_revision(health, generation):
+    # First distributed deployments predate version metadata in /healthz.
+    # Only their explicit, operator-owned seed revision can establish a floor.
+    version = health.get("androidVersion", {}).get("revision")
+    if version is None:
+        config = json.loads(Path(generation["config"]).read_text())
+        versions = config.get("versions", {})
+        version = versions.get("deploymentRevision", versions.get("revision"))
+    if type(version) is not int or not 0 < version <= 2100000000 - 800000:
+        raise ValueError("cannot establish installed deployment version floor")
+    return version
+
+
 def run(command, **kwargs):
     return subprocess.run(list(map(str, command)), check=True, timeout=1800, **kwargs)
 
@@ -319,7 +332,7 @@ def main():
         initial = ready(active, child)
         if not initial:
             raise RuntimeError("initial worker failed readiness")
-        state["counter"] = max(state["counter"], initial["androidVersion"]["revision"])
+        state["counter"] = max(state["counter"], initial_revision(initial, active))
         # Include generations allocated just before a power loss/state-file commit.
         for path in (root / "generations").glob("*.json"):
             if path.stem.isdigit():

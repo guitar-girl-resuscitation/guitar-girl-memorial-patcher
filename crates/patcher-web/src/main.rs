@@ -819,6 +819,28 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_metadata_matches_active_deployment_and_signer() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = test_state(dir.path());
+        let config = Arc::make_mut(&mut state.config);
+        let revision = config.versions.revision + 1;
+        config.versions.deployment_revision = Some(revision);
+        config.application_id = Some("org.guitargirlresuscitation.memorial.test".into());
+        config.signing.fingerprint = "AB".repeat(32);
+        let Json(info) = update_info(State(state.clone())).await;
+        let Json(status) = health(State(state.clone())).await;
+        assert_eq!(info["schema"], 1);
+        assert_eq!(info["versionCode"], status.android_version.version_code);
+        assert_eq!(info["versionName"], status.android_version.version_name);
+        assert_eq!(
+            info["applicationId"],
+            state.config.application_id.as_ref().unwrap().as_str()
+        );
+        assert_eq!(info["signerSha256"], state.config.signing.fingerprint);
+        assert_eq!(status.android_version.revision, revision);
+    }
+
+    #[tokio::test]
     async fn absent_invalid_operator_falls_back_and_upload_is_verified_and_cleaned() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = test_state(dir.path());

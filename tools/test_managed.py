@@ -42,6 +42,18 @@ HTTPServer((host, int(port)), Handler).serve_forever()
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_historical_seed_requires_an_explicit_version_floor(self):
+        with tempfile.TemporaryDirectory(prefix="ggfm-seed-test-") as tmp:
+            config = Path(tmp) / "seed.json"
+            generation = {"config": str(config)}
+            config.write_text(json.dumps({"versions": {"revision": 1}}))
+            self.assertEqual(m.initial_revision({"ok": True}, generation), 1)
+            self.assertEqual(m.initial_revision({"androidVersion": {"revision": 9}}, generation), 9)
+            for version in (None, 0, -1, True, "1", 2100000000):
+                config.write_text(json.dumps({"versions": {"revision": version}}))
+                with self.assertRaises(ValueError):
+                    m.initial_revision({"ok": True}, generation)
+
     def test_counter_never_reuses_or_exceeds_android_range(self):
         self.assertEqual(m.next_revision(8, 8), 9)
         self.assertEqual(m.next_revision(8, 15), 15)
