@@ -1,0 +1,3 @@
+[submodule "patch"]
+	path = patch
+	url = https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patch.git

@@ -1,0 +1,72 @@
+name: Build and release
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: patcher-release-${{ github.event_name == 'pull_request' && github.ref || 'publish' }}
+  cancel-in-progress: false
+env:
+  CARGO_BUILD_JOBS: 2
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Audit both exact source trees
+        run: |
+          python tools/release_guard.py --history
+          python patch/tools/release_guard.py --history
+      - name: Rust toolchain
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+      - name: Test protocol package validation and browser hashing
+        run: |
+          cargo test --workspace --locked -j2
+          node tools/test-browser-sha256.mjs
+          cd patch
+          python -m unittest discover -s tests -v
+      - name: Compile CLI and web service
+        run: cargo build --workspace --locked --release -j2
+      - name: Package original software only
+        run: python tools/release_artifacts.py pack --kind patcher-linux-x64 --file ggfm-patcher=target/release/ggfm-patcher --file ggfm-patcher-web=target/release/ggfm-patcher-web --file patcher.example.json=config/patcher.example.json --file DEPLOYMENT.md=docs/DEPLOYMENT.md
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patcher-release
+          path: |
+            dist/*.zip
+            dist/*.sha256
+          if-no-files-found: error
+          retention-days: 7
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: patcher-release
+          path: dist
+      - name: Publish verified binaries
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'nightly' }}
+        run: python tools/release_artifacts.py publish --tag "$RELEASE_TAG"

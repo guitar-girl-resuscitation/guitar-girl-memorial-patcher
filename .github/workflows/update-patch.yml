@@ -1,0 +1,49 @@
+name: Update verified Patch release
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+permissions:
+  contents: write
+  actions: write
+concurrency:
+  group: update-patch
+  cancel-in-progress: false
+env:
+  CARGO_BUILD_JOBS: 2
+jobs:
+  update:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          submodules: true
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Resolve and verify upstream artifact, then update gitlink
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python tools/update_patch.py
+      - name: Verify updated dependency
+        run: |
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+          cargo test --workspace --locked -j2
+          python tools/release_guard.py --history
+          python patch/tools/release_guard.py --history
+          cd patch
+          python -m unittest discover -s tests -v
+      - name: Commit only the validated pin and dispatch build
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --cached --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -m "Update verified Patch release pin"
+          git push origin HEAD:main
+          gh workflow run release.yml --ref main

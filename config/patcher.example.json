@@ -1,0 +1,45 @@
+{
+  "listen": "127.0.0.1:8080",
+  "applicationId": "org.guitargirlresuscitation.memorial.selfhosted",
+  "compatibilityManifest": "C:/ggfm/patch/compatibility/8.0.0.json",
+  "cacheRoot": "C:/ggfm/private/cache",
+  "workRoot": "C:/ggfm/private/work",
+  "tools": {
+    "java": "C:/Program Files/Zulu/zulu-21/bin/java.exe",
+    "apktoolJar": "C:/ggfm/tools/apktool.jar",
+    "python": "C:/Python311/python.exe",
+    "aapt2": "C:/Android/sdk/build-tools/35.0.0/aapt2.exe",
+    "zipalign": "C:/Android/sdk/build-tools/35.0.0/zipalign.exe",
+    "apksigner": "C:/Android/sdk/build-tools/35.0.0/apksigner.bat"
+  },
+  "artifacts": {
+    "patchRoot": "C:/ggfm/patch",
+    "bootstrapDex": "C:/ggfm/releases/patch/classes.dex",
+    "bootstrapDexSha256": "REPLACE_WITH_PATCH_RELEASE_SHA256",
+    "bootstrapSo": "C:/ggfm/releases/patch/libggfm_bootstrap.so",
+    "bootstrapSoSha256": "REPLACE_WITH_PATCH_RELEASE_SHA256",
+    "dobbySo": "C:/ggfm/releases/patch/libdobby.so",
+    "dobbySha256": "REPLACE_WITH_PINNED_DOBBY_SHA256",
+    "serverSo": "C:/ggfm/releases/server/libggfm_server.so",
+    "serverSha256": "REPLACE_WITH_RELEASE_SHA256",
+    "policyManifest": "C:/ggfm/patch/policy/memorial-policy.v1.json",
+    "policySha256": "REPLACE_WITH_PATCH_RELEASE_SHA256"
+  },
+  "signing": {
+    "keystore": "C:/ggfm/private/signing/memorial.jks",
+    "alias": "memorial",
+    "storePasswordEnv": "GGFM_KEYSTORE_PASSWORD",
+    "keyPasswordEnv": "GGFM_KEY_PASSWORD",
+    "fingerprint": "REPLACE_WITH_CERTIFICATE_SHA256"
+  },
+  "versions": {
+    "patchCommit": "REPLACE_WITH_40_HEX_GIT_COMMIT",
+    "patchVersion": "0.1.0",
+    "serverVersion": "0.1.0",
+    "serverAbi": 1,
+    "revision": 1
+  },
+  "prebuilt": {
+    "operatorSourceXapk": "C:/ggfm/private/operator-source/Guitar Girl_8.0.0_APKPure.xapk"
+  }
+}

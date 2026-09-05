@@ -1,0 +1,10 @@
+[package]
+name = "ggfm-patcher"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+clap.workspace = true
+ggfm-patcher-core = { path = "../patcher-core" }
+serde_json.workspace = true
