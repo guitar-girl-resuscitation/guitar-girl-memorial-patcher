@@ -22,7 +22,9 @@
   <p data-i18n="intro">选择你自己持有的原版 XAPK。文件会先在浏览器中分块计算 SHA-256；不匹配的版本不会上传。</p>
   <p class="muted" data-i18n="privacy">公开源码不包含游戏。完整上传模式会删除临时原包；部署者启用私有预置模式后，校验通过即可下载已缓存成品，仅上传随机校验分块。</p>
   <label class="drop" for="source"><strong data-i18n="choose">选择 Guitar Girl 8.0.0 XAPK</strong><br><span id="filename" class="muted">尚未选择</span></label>
-  <input id="source" type="file" accept=".xapk,application/zip">
+  <!-- Android document providers do not consistently assign XAPK a MIME type.
+       Leave the picker unrestricted; SHA-256 allowlisting gates every upload. -->
+  <input id="source" type="file">
   <progress id="progress" max="1" value="0"></progress>
   <p id="hash" class="hash"></p>
   <div class="actions">

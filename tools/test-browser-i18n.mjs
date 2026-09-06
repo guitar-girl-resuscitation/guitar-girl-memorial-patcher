@@ -2,6 +2,13 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
 const html=readFileSync(new URL('../web/index.html',import.meta.url),'utf8');
+// XAPK can be ZIP, octet-stream, or unknown to Android's document provider.
+// An accept filter can hide valid files before our content hash check runs.
+const fileInput=html.match(/<input\b[^>]*\bid="source"[^>]*>/)[0];
+assert.match(fileInput,/\btype="file"/);
+assert.doesNotMatch(fileInput,/\baccept\s*=/i);
+assert.match(html,/const ok=digest===health\.sourceSha256\.toUpperCase\(\)/);
+assert.match(html,/if\(busy\|\|!file\|\|!health\|\|digest!==health\.sourceSha256\.toUpperCase\(\)\)return/);
 const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function element(){return {textContent:'',value:'',disabled:false,children:[],dataset:{},setAttribute(k,v){this[k]=v},replaceChildren(...children){this.children=children}}}
 async function page(browserLanguage, stored, blocked=false, prebuilt=true){
