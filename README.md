@@ -200,3 +200,9 @@ selects a language from the browser, and remembers the language selector choice
 when browser storage is available. Other browser languages fall back to English.
 Raw server diagnostic messages remain English. Changing language does not
 restart verification or invalidate a ready download link.
+
+The homepage also displays the active Server, Patch and Patcher source commits
+and source update dates (UTC). These describe the deployed configuration and
+compiled worker, not GitHub's moving latest release. Dates missing from older
+artifacts are shown as “Not recorded”; pinned metadata is used only for matching
+full commits. Server/Patch content may change independently of the worker.

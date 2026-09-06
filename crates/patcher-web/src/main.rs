@@ -97,6 +97,10 @@ struct VersionConfig {
     revision: u32,
     #[serde(default)]
     deployment_revision: Option<u32>,
+    #[serde(default)]
+    patch_updated_at: Option<String>,
+    #[serde(default)]
+    server_updated_at: Option<String>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -140,6 +144,7 @@ struct Health {
     source_version: String,
     source_sha256: String,
     android_version: ggfm_patcher_core::AndroidVersion,
+    components: serde_json::Value,
 }
 
 #[derive(Serialize)]
@@ -383,7 +388,40 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
             state.config.versions.deployment_revision,
         )
         .expect("version validated before serving"),
+        components: component_versions(&state.config.versions),
     })
+}
+
+fn component_versions(versions: &VersionConfig) -> serde_json::Value {
+    let lock: serde_json::Value = serde_json::from_str(include_str!("../../../config/upstream-patch.json")).expect("reviewed upstream lock");
+    let date = |commit: &str, recorded: &Option<String>, expected: &serde_json::Value, fallback: &serde_json::Value| {
+        recorded.clone().or_else(|| (expected.as_str() == Some(commit)).then(|| fallback.as_str().map(str::to_owned)).flatten())
+    };
+    serde_json::json!({
+        "server": {"commit": versions.server_version, "sourceUpdatedAt": date(&versions.server_version, &versions.server_updated_at, &lock["serverCommit"], &lock["serverUpdatedAt"])},
+        "patch": {"commit": versions.patch_commit, "sourceUpdatedAt": date(&versions.patch_commit, &versions.patch_updated_at, &lock["commit"], &lock["patchUpdatedAt"])},
+        "patcher": {"commit": env!("GGFM_SOURCE_COMMIT"), "sourceUpdatedAt": env!("GGFM_SOURCE_UPDATED_AT")}
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn component_dates_never_follow_an_unrelated_upstream_release() {
+    let mut config: Config = serde_json::from_str(include_str!("../../../config/patcher.example.json")).unwrap();
+    let lock: serde_json::Value = serde_json::from_str(include_str!("../../../config/upstream-patch.json")).unwrap();
+    config.versions.patch_commit = lock["commit"].as_str().unwrap().into();
+    config.versions.server_version = lock["serverCommit"].as_str().unwrap().into();
+    let matched = component_versions(&config.versions);
+    assert_eq!(matched["patch"]["sourceUpdatedAt"], lock["patchUpdatedAt"]);
+    assert_eq!(matched["server"]["sourceUpdatedAt"], lock["serverUpdatedAt"]);
+    config.versions.server_version = "a".repeat(40);
+    config.versions.patch_commit = "b".repeat(40);
+    let changed = component_versions(&config.versions);
+    assert!(changed["server"]["sourceUpdatedAt"].is_null());
+    assert!(changed["patch"]["sourceUpdatedAt"].is_null());
+    config.versions.server_updated_at = Some("2027-01-02T03:04:05Z".into());
+    assert_eq!(component_versions(&config.versions)["server"]["sourceUpdatedAt"], "2027-01-02T03:04:05Z");
+    assert_eq!(changed["patcher"]["commit"], env!("GGFM_SOURCE_COMMIT"));
 }
 
 async fn update_info(State(state): State<AppState>) -> Json<serde_json::Value> {

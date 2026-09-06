@@ -6,7 +6,7 @@ const script=html.match(/<script>([\s\S]*?)<\/script>/)[1];
 function element(){return {textContent:'',value:'',disabled:false,children:[],dataset:{},setAttribute(k,v){this[k]=v},replaceChildren(...children){this.children=children}}}
 async function page(browserLanguage, stored, blocked=false, prebuilt=true){
  const nodes=new Map();
- for(const id of ['source','status','progress','language','filename','upload','hash'])nodes.set(id,element());
+ for(const id of ['source','status','progress','language','filename','upload','hash','versions'])nodes.set(id,element());
  nodes.get('upload').disabled=true;
  const labels=[...html.matchAll(/data-i18n="([^"]+)"/g)].map(m=>Object.assign(element(),{dataset:{i18n:m[1]}}));
  const document={documentElement:{},getElementById:id=>nodes.get(id),querySelectorAll:()=>labels,createElement:element,createTextNode:text=>({textContent:text})};
@@ -21,6 +21,11 @@ async function page(browserLanguage, stored, blocked=false, prebuilt=true){
 const en=await page('en-US',null);
 assert.equal(en.document.documentElement.lang,'en');
 assert.equal(en.nodes.get('upload').textContent,'Verify and download');
+assert.equal(en.nodes.get('versions').children.length,3);
+assert.equal(en.nodes.get('versions').children[0].children[1].textContent,'Not recorded');
+vm.runInContext("health.components={server:{commit:'97d8c39dee247f30e9576612eff88022ba063c40',sourceUpdatedAt:'2026-09-06T09:26:51Z'}};renderVersions()",en.context);
+assert.equal(en.nodes.get('versions').children[0].children[1].textContent,'97d8c39');
+assert.equal(en.nodes.get('versions').children[0].children[2].textContent,'2026-09-06 09:26:51 UTC');
 assert.match(en.nodes.get('status').textContent,/Supports Guitar Girl/);
 vm.runInContext('download({downloadToken:"one-use-token"})',en.context);
 assert.equal(en.nodes.get('status').className,'complete');

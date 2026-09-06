@@ -32,12 +32,19 @@ def main():
         if asset.get("digest") != "sha256:" + digest(archive).lower():
             raise SystemExit("upstream asset digest mismatch")
         metadata = verify_archive(archive)
+        import zipfile
+        with zipfile.ZipFile(archive) as packed:
+            dependencies = json.loads(packed.read("dependencies.json"))
         commit = metadata["sourceCommit"]
         if metadata["kind"] != "patch-android-arm64" or release["target_commitish"] != commit:
             raise SystemExit("upstream artifact is not built from the release target")
         lock = {"schema": 1, "repository": UPSTREAM, "commit": commit,
                 "releaseId": release["id"], "assetId": asset["id"],
                 "archiveSha256": digest(archive)}
+        server_commit = dependencies["server"]["sourceCommit"]
+        lock.update(serverCommit=server_commit,
+            patchUpdatedAt=json.loads(out("gh", "api", f"repos/{UPSTREAM}/git/commits/{commit}"))["committer"]["date"],
+            serverUpdatedAt=json.loads(out("gh", "api", f"repos/guitar-girl-resuscitation/guitar-girl-memorial-server/git/commits/{server_commit}"))["committer"]["date"])
     run("git", "-C", "patch", "fetch", "--depth", "1", "origin", commit)
     run("git", "-C", "patch", "checkout", "--detach", commit)
     # This script is the explicitly authorized automated pin update. Never
@@ -48,4 +55,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-

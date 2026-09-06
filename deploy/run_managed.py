@@ -205,6 +205,13 @@ def stage(root, base, worker_release, patch_release, previous_revision):
     revision = next_revision(previous_revision, compiled)
     config["versions"] = {"patchCommit": patch_release["commit"], "patchVersion": patch_release["commit"],
         "serverVersion": dependencies["server"]["sourceCommit"], "serverAbi": 1, "deploymentRevision": revision}
+    # Optional provenance: failure to look up dates must not prevent an update.
+    for key, repo, commit in [("patchUpdatedAt", PATCH, patch_release["commit"]),
+                             ("serverUpdatedAt", "guitar-girl-memorial-server", dependencies["server"]["sourceCommit"])]:
+        try:
+            config["versions"][key] = api(f"repos/{ORG}/{repo}/git/commits/{commit}")["committer"]["date"]
+        except (OSError, ValueError, KeyError):
+            log(f"Source date unavailable for {repo}; leaving it unknown")
     artifacts = config["artifacts"]
     artifacts["patchRoot"] = str(source)
     artifacts["policyManifest"] = str(source / "policy/memorial-policy.v1.json")
