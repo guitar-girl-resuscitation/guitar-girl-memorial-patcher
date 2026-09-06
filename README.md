@@ -2,6 +2,8 @@
 
 English · [简体中文](README.zh-CN.md)
 
+Architecture support and source-package limitations: [Android ABI selection](docs/ANDROID_ABI.md).
+
 A verified CLI and single-worker web patcher for **Guitar Girl Fan Memorial Build**. It turns a supported, user-supplied original XAPK into a standalone memorial package with an embedded Rust server.
 
 This repository and its public Releases contain tools, **not the original or patched game**.

@@ -111,6 +111,9 @@ impl Pipeline {
             return Err(PipelineError::OutputExists(output.to_owned()));
         }
         self.validate_artifacts()?;
+        for path in [&self.artifacts.bootstrap_so, &self.artifacts.dobby_so, &self.artifacts.server_so] {
+            validate_elf_abi(path, manifest.source.abi)?;
+        }
         let current = verify_xapk(source, manifest, self.limits)?;
         if current.outer_sha256 != verified.outer_sha256 {
             return Err(PipelineError::SourceChanged(current.outer_sha256));
@@ -130,7 +133,7 @@ impl Pipeline {
             .splits
             .iter()
             .map(|split| split.name.as_str())
-            .find(|name| *name != "config.arm64_v8a.apk" && *name != "base_assets.apk")
+            .find(|name| *name != manifest.source.abi.split_name() && *name != "base_assets.apk")
             .ok_or(PipelineError::MissingBase)?;
         let version_code = i64::from(version.version_code);
         let version_name = version.version_name;
@@ -368,25 +371,25 @@ impl Pipeline {
         rebuilt.insert(base_name.to_owned(), patched_base);
 
         let arm = rebuilt
-            .get("config.arm64_v8a.apk")
-            .ok_or_else(|| PipelineError::MissingXapkEntry("config.arm64_v8a.apk".into()))?;
-        let patched_arm = unsigned_dir.join("arm64-injected.apk");
+            .get(manifest.source.abi.split_name())
+            .ok_or_else(|| PipelineError::MissingXapkEntry(manifest.source.abi.split_name().into()))?;
+        let patched_arm = unsigned_dir.join("native-injected.apk");
         append_zip_entries(
             arm,
             &patched_arm,
             &[
                 (
                     &self.artifacts.bootstrap_so,
-                    "lib/arm64-v8a/libggfm_bootstrap.so".into(),
+                    manifest.source.abi.library("libggfm_bootstrap.so"),
                 ),
-                (&self.artifacts.dobby_so, "lib/arm64-v8a/libdobby.so".into()),
+                (&self.artifacts.dobby_so, manifest.source.abi.library("libdobby.so")),
                 (
                     &self.artifacts.server_so,
-                    "lib/arm64-v8a/libggfm_server.so".into(),
+                    manifest.source.abi.library("libggfm_server.so"),
                 ),
             ],
         )?;
-        rebuilt.insert("config.arm64_v8a.apk".into(), patched_arm);
+        rebuilt.insert(manifest.source.abi.split_name().into(), patched_arm);
         enforce_work_quota(workspace.path(), self.limits.max_work_bytes)?;
 
         for (name, unsigned) in &rebuilt {
@@ -457,6 +460,7 @@ impl Pipeline {
 
         validate_injected_payloads(
             &signed_dir,
+            manifest.source.abi,
             base_name,
             &bootstrap_dex_name,
             &transformed_table_bundle_sha256,
@@ -642,33 +646,16 @@ fn validate_native_artifact(
 
 fn elf_dynamic(path: &Path) -> Result<ElfDynamic, PipelineError> {
     let mut file = File::open(path)?;
-    let mut header = [0_u8; 64];
+    let programs = elf_programs(&mut file)?;
+    file.seek(SeekFrom::Start(0))?;
+    let mut header = [0_u8; 6];
     file.read_exact(&mut header)?;
-    if &header[..4] != b"\x7fELF" || header[4] != 2 || header[5] != 1 {
-        return Err(PipelineError::OutputValidation(format!(
-            "{} is not little-endian ELF64",
-            path.display()
-        )));
-    }
-    let program_offset = u64::from_le_bytes(header[32..40].try_into().unwrap());
-    let entry_size = u16::from_le_bytes(header[54..56].try_into().unwrap()) as u64;
-    let entry_count = u16::from_le_bytes(header[56..58].try_into().unwrap()) as u64;
-    if entry_size < 56 || entry_count == 0 || entry_count > 256 {
-        return Err(PipelineError::OutputValidation(format!(
-            "{} has an invalid program table",
-            path.display()
-        )));
-    }
+    let elf32 = header[4] == 1;
+    let dynamic_entry_size = if elf32 { 8 } else { 16 };
     let mut load_segments = Vec::new();
     let mut dynamic_segment = None;
-    for index in 0..entry_count {
-        file.seek(SeekFrom::Start(program_offset + index * entry_size))?;
-        let mut program = [0_u8; 56];
-        file.read_exact(&mut program)?;
-        let kind = u32::from_le_bytes(program[0..4].try_into().unwrap());
-        let offset = u64::from_le_bytes(program[8..16].try_into().unwrap());
-        let virtual_address = u64::from_le_bytes(program[16..24].try_into().unwrap());
-        let file_size = u64::from_le_bytes(program[32..40].try_into().unwrap());
+    for program in programs {
+        let ElfProgram { kind, offset, virtual_address, file_size, .. } = program;
         if kind == 1 {
             load_segments.push((virtual_address, offset, file_size));
         } else if kind == 2 {
@@ -678,7 +665,7 @@ fn elf_dynamic(path: &Path) -> Result<ElfDynamic, PipelineError> {
     let (dynamic_offset, dynamic_size) = dynamic_segment.ok_or_else(|| {
         PipelineError::OutputValidation(format!("{} has no PT_DYNAMIC", path.display()))
     })?;
-    if dynamic_size > 4 * 1024 * 1024 || dynamic_size % 16 != 0 {
+    if dynamic_size > 4 * 1024 * 1024 || dynamic_size % dynamic_entry_size != 0 {
         return Err(PipelineError::OutputValidation(format!(
             "{} has an invalid dynamic table",
             path.display()
@@ -688,12 +675,17 @@ fn elf_dynamic(path: &Path) -> Result<ElfDynamic, PipelineError> {
     let mut soname_offset = None;
     let mut string_virtual_address = None;
     let mut string_size = None;
-    for index in 0..(dynamic_size / 16) {
-        file.seek(SeekFrom::Start(dynamic_offset + index * 16))?;
+    for index in 0..(dynamic_size / dynamic_entry_size) {
+        file.seek(SeekFrom::Start(dynamic_offset + index * dynamic_entry_size))?;
         let mut entry = [0_u8; 16];
-        file.read_exact(&mut entry)?;
-        let tag = i64::from_le_bytes(entry[0..8].try_into().unwrap());
-        let value = u64::from_le_bytes(entry[8..16].try_into().unwrap());
+        file.read_exact(&mut entry[..dynamic_entry_size as usize])?;
+        let (tag, value) = if elf32 {
+            (i32::from_le_bytes(entry[0..4].try_into().unwrap()) as i64,
+             u32::from_le_bytes(entry[4..8].try_into().unwrap()) as u64)
+        } else {
+            (i64::from_le_bytes(entry[0..8].try_into().unwrap()),
+             u64::from_le_bytes(entry[8..16].try_into().unwrap()))
+        };
         match tag {
             0 => break,
             1 => needed_offsets.push(value),
@@ -719,7 +711,8 @@ fn elf_dynamic(path: &Path) -> Result<ElfDynamic, PipelineError> {
         .iter()
         .find_map(|(virtual_address, offset, file_size)| {
             let relative = string_virtual_address.checked_sub(*virtual_address)?;
-            (relative < *file_size).then_some(offset + relative)
+            let end = relative.checked_add(string_size)?;
+            if end <= *file_size { offset.checked_add(relative) } else { None }
         })
         .ok_or_else(|| {
             PipelineError::OutputValidation(format!(
@@ -783,10 +776,11 @@ fn verify_embedded_payloads(
     }
     let native = workspace.join("verified-libil2cpp.so");
     extract_zip_member(
-        &extracted.join("config.arm64_v8a.apk"),
-        "lib/arm64-v8a/libil2cpp.so",
+        &extracted.join(manifest.source.abi.split_name()),
+        &manifest.source.abi.library("libil2cpp.so"),
         &native,
     )?;
+    validate_elf_abi(&native, manifest.source.abi)?;
     let actual_native = sha256_file(&native)?;
     if !actual_native.eq_ignore_ascii_case(&manifest.source.il2cpp.sha256) {
         return Err(PipelineError::PayloadMismatch(format!(
@@ -845,42 +839,86 @@ fn verify_embedded_payloads(
     Ok(())
 }
 
+struct ElfProgram {
+    kind: u32,
+    flags: u32,
+    offset: u64,
+    virtual_address: u64,
+    file_size: u64,
+}
+
+fn validate_elf_abi(path: &Path, abi: crate::manifest::AndroidAbi) -> Result<(), PipelineError> {
+    let mut header = [0_u8; 20];
+    File::open(path)?.read_exact(&mut header)?;
+    let expected = abi.elf_identity();
+    let actual = (header[4], u16::from_le_bytes(header[18..20].try_into().unwrap()));
+    if &header[..4] != b"\x7fELF" || header[5] != 1 || actual != expected {
+        return Err(PipelineError::OutputValidation(format!("{} has wrong ELF ABI for {abi:?}", path.display())));
+    }
+    Ok(())
+}
+
+fn elf_programs(file: &mut File) -> Result<Vec<ElfProgram>, PipelineError> {
+    file.seek(SeekFrom::Start(0))?;
+    let mut header = [0_u8; 64];
+    file.read_exact(&mut header)?;
+    if &header[..4] != b"\x7fELF" || !matches!(header[4], 1 | 2) || header[5] != 1 {
+        return Err(PipelineError::PayloadMismatch(
+            "native library is not little-endian ELF32/ELF64".into(),
+        ));
+    }
+    let elf32 = header[4] == 1;
+    let (program_offset, size_at, count_at, minimum_size) = if elf32 {
+        (u32::from_le_bytes(header[28..32].try_into().unwrap()) as u64, 42, 44, 32)
+    } else {
+        (u64::from_le_bytes(header[32..40].try_into().unwrap()), 54, 56, 56)
+    };
+    let entry_size = u16::from_le_bytes(header[size_at..size_at + 2].try_into().unwrap()) as u64;
+    let entry_count = u16::from_le_bytes(header[count_at..count_at + 2].try_into().unwrap()) as u64;
+    let image_size = file.metadata()?.len();
+    let table_end = entry_size.checked_mul(entry_count).and_then(|size| program_offset.checked_add(size));
+    if entry_size < minimum_size || entry_count == 0 || entry_count > 256
+        || table_end.is_none_or(|end| end > image_size) {
+        return Err(PipelineError::PayloadMismatch(
+            "invalid ELF program table".into(),
+        ));
+    }
+    let mut programs = Vec::new();
+    for index in 0..entry_count {
+        file.seek(SeekFrom::Start(program_offset + index * entry_size))?;
+        let mut raw = [0_u8; 56];
+        file.read_exact(&mut raw[..minimum_size as usize])?;
+        let word = |at| u32::from_le_bytes(raw[at..at + 4].try_into().unwrap());
+        let wide = |at| u64::from_le_bytes(raw[at..at + 8].try_into().unwrap());
+        let program = if elf32 {
+            ElfProgram { kind: word(0), flags: word(24), offset: word(4) as u64,
+                virtual_address: word(8) as u64, file_size: word(16) as u64 }
+        } else {
+            ElfProgram { kind: word(0), flags: word(4), offset: wide(8),
+                virtual_address: wide(16), file_size: wide(32) }
+        };
+        if program.offset.checked_add(program.file_size).is_none_or(|end| end > image_size) {
+            return Err(PipelineError::PayloadMismatch("ELF segment exceeds file".into()));
+        }
+        programs.push(program);
+    }
+    Ok(programs)
+}
+
 fn elf_rva_to_file_offset(
     file: &mut File,
     rva: u64,
     required_size: u64,
 ) -> Result<u64, PipelineError> {
-    file.seek(SeekFrom::Start(0))?;
-    let mut header = [0_u8; 64];
-    file.read_exact(&mut header)?;
-    if &header[..4] != b"\x7fELF" || header[4] != 2 || header[5] != 1 {
-        return Err(PipelineError::PayloadMismatch(
-            "libil2cpp.so is not little-endian ELF64".into(),
-        ));
-    }
-    let program_offset = u64::from_le_bytes(header[32..40].try_into().unwrap());
-    let entry_size = u16::from_le_bytes(header[54..56].try_into().unwrap()) as u64;
-    let entry_count = u16::from_le_bytes(header[56..58].try_into().unwrap()) as u64;
-    if entry_size < 56 || entry_count > 256 {
-        return Err(PipelineError::PayloadMismatch(
-            "invalid ELF program table".into(),
-        ));
-    }
+    let programs = elf_programs(file)?;
     let rva_end = rva.checked_add(required_size).ok_or_else(|| {
         PipelineError::PayloadMismatch(format!("overflowing IL2CPP RVA 0x{rva:X}"))
     })?;
-    for index in 0..entry_count {
-        file.seek(SeekFrom::Start(program_offset + index * entry_size))?;
-        let mut program = [0_u8; 56];
-        file.read_exact(&mut program)?;
-        let kind = u32::from_le_bytes(program[0..4].try_into().unwrap());
-        let flags = u32::from_le_bytes(program[4..8].try_into().unwrap());
+    for program in programs {
+        let ElfProgram { kind, flags, offset, virtual_address, file_size } = program;
         if kind != 1 || flags & 1 == 0 {
             continue;
         }
-        let offset = u64::from_le_bytes(program[8..16].try_into().unwrap());
-        let virtual_address = u64::from_le_bytes(program[16..24].try_into().unwrap());
-        let file_size = u64::from_le_bytes(program[32..40].try_into().unwrap());
         let virtual_end = virtual_address.checked_add(file_size).ok_or_else(|| {
             PipelineError::PayloadMismatch("overflowing ELF executable segment".into())
         })?;
@@ -895,30 +933,12 @@ fn elf_rva_to_file_offset(
 
 fn elf_gnu_build_id(path: &Path) -> Result<String, PipelineError> {
     let mut file = File::open(path)?;
-    let mut header = [0_u8; 64];
-    file.read_exact(&mut header)?;
-    if &header[..4] != b"\x7fELF" || header[4] != 2 || header[5] != 1 {
-        return Err(PipelineError::PayloadMismatch(
-            "libil2cpp.so is not little-endian ELF64".into(),
-        ));
-    }
-    let program_offset = u64::from_le_bytes(header[32..40].try_into().unwrap());
-    let entry_size = u16::from_le_bytes(header[54..56].try_into().unwrap()) as u64;
-    let entry_count = u16::from_le_bytes(header[56..58].try_into().unwrap()) as u64;
-    if entry_size < 56 || entry_count > 256 {
-        return Err(PipelineError::PayloadMismatch(
-            "invalid ELF program table".into(),
-        ));
-    }
-    for index in 0..entry_count {
-        file.seek(SeekFrom::Start(program_offset + index * entry_size))?;
-        let mut program = [0_u8; 56];
-        file.read_exact(&mut program)?;
-        if u32::from_le_bytes(program[0..4].try_into().unwrap()) != 4 {
+    for program in elf_programs(&mut file)? {
+        if program.kind != 4 {
             continue;
         }
-        let note_offset = u64::from_le_bytes(program[8..16].try_into().unwrap());
-        let note_size = u64::from_le_bytes(program[32..40].try_into().unwrap());
+        let note_offset = program.offset;
+        let note_size = program.file_size;
         if note_size > 64 * 1024 {
             return Err(PipelineError::PayloadMismatch("oversized ELF note".into()));
         }
@@ -1193,6 +1213,7 @@ fn validate_signed_manifest(
 
 fn validate_injected_payloads(
     signed_dir: &Path,
+    abi: crate::manifest::AndroidAbi,
     base_name: &str,
     expected_dex: &str,
     transformed_table_bundle_sha256: &str,
@@ -1208,11 +1229,11 @@ fn validate_injected_payloads(
         ],
     )?;
     validate_zip_entries(
-        &signed_dir.join("config.arm64_v8a.apk"),
+        &signed_dir.join(abi.split_name()),
         &[
-            "lib/arm64-v8a/libggfm_bootstrap.so",
-            "lib/arm64-v8a/libdobby.so",
-            "lib/arm64-v8a/libggfm_server.so",
+            &abi.library("libggfm_bootstrap.so"),
+            &abi.library("libdobby.so"),
+            &abi.library("libggfm_server.so"),
         ],
     )?;
     let actual = zip_member_sha256(
@@ -1407,7 +1428,7 @@ fn build_xapk(
         io::copy(&mut File::open(extracted.join("icon.png"))?, &mut writer)?;
     }
     for split in &manifest.source.splits {
-        let output_name = if split.name != "config.arm64_v8a.apk" && split.name != "base_assets.apk"
+        let output_name = if split.name != manifest.source.abi.split_name() && split.name != "base_assets.apk"
         {
             format!("{}.apk", plan.application_id)
         } else {
@@ -1518,6 +1539,107 @@ fn validate_output_xapk(
 #[cfg(test)]
 mod output_validation_tests {
     use super::*;
+
+    #[test]
+    fn native_abi_guard_rejects_mixed_server_and_patch_architectures() {
+        use crate::manifest::AndroidAbi;
+        let file = NamedTempFile::new().unwrap();
+        let mut header = [0_u8; 20];
+        header[..6].copy_from_slice(b"\x7fELF\x01\x01");
+        header[18..20].copy_from_slice(&40_u16.to_le_bytes());
+        fs::write(file.path(), header).unwrap();
+        assert!(validate_elf_abi(file.path(), AndroidAbi::ArmV7).is_ok());
+        assert!(validate_elf_abi(file.path(), AndroidAbi::Arm64).is_err());
+        header[4] = 2;
+        header[18..20].copy_from_slice(&183_u16.to_le_bytes());
+        fs::write(file.path(), header).unwrap();
+        assert!(validate_elf_abi(file.path(), AndroidAbi::Arm64).is_ok());
+        assert!(validate_elf_abi(file.path(), AndroidAbi::ArmV7).is_err());
+        assert!(serde_json::from_str::<AndroidAbi>("\"x86\"").is_err());
+    }
+
+    #[test]
+    fn dynamic_dependencies_and_soname_are_consistent_for_both_elf_classes() {
+        for elf32 in [true, false] {
+            let mut image = vec![0_u8; 0x200];
+            image[..6].copy_from_slice(b"\x7fELF\x02\x01");
+            image[4] = if elf32 { 1 } else { 2 };
+            let stride = if elf32 { 8 } else { 16 };
+            if elf32 {
+                image[28..32].copy_from_slice(&52_u32.to_le_bytes());
+                image[42..44].copy_from_slice(&32_u16.to_le_bytes());
+                image[44..46].copy_from_slice(&2_u16.to_le_bytes());
+                for (at, kind, offset, address, size) in [(52, 1, 0, 0x1000, 0x200), (84, 2, 0x100, 0x1100, 40)] {
+                    for (field, value) in [(0, kind), (4, offset), (8, address), (16, size)] {
+                        image[at + field..at + field + 4].copy_from_slice(&(value as u32).to_le_bytes());
+                    }
+                }
+            } else {
+                image[32..40].copy_from_slice(&64_u64.to_le_bytes());
+                image[54..56].copy_from_slice(&56_u16.to_le_bytes());
+                image[56..58].copy_from_slice(&2_u16.to_le_bytes());
+                for (at, kind, offset, address, size) in [(64, 1, 0, 0x1000, 0x200), (120, 2, 0x100, 0x1100, 80)] {
+                    image[at..at + 4].copy_from_slice(&(kind as u32).to_le_bytes());
+                    for (field, value) in [(8, offset), (16, address), (32, size)] {
+                        image[at + field..at + field + 8].copy_from_slice(&(value as u64).to_le_bytes());
+                    }
+                }
+            }
+            let strings = b"libc.so\0libtest.so\0";
+            image[0x180..0x180 + strings.len()].copy_from_slice(strings);
+            for (i, (tag, value)) in [(5_u64, 0x1180_u64), (10, strings.len() as u64), (1, 0), (14, 8), (0, 0)].into_iter().enumerate() {
+                let at = 0x100 + i * stride;
+                if elf32 {
+                    image[at..at + 4].copy_from_slice(&(tag as u32).to_le_bytes());
+                    image[at + 4..at + 8].copy_from_slice(&(value as u32).to_le_bytes());
+                } else {
+                    image[at..at + 8].copy_from_slice(&tag.to_le_bytes());
+                    image[at + 8..at + 16].copy_from_slice(&value.to_le_bytes());
+                }
+            }
+            let file = NamedTempFile::new().unwrap();
+            fs::write(file.path(), image).unwrap();
+            let dynamic = elf_dynamic(file.path()).unwrap();
+            assert_eq!(dynamic.needed, vec!["libc.so"]);
+            assert_eq!(dynamic.soname.as_deref(), Some("libtest.so"));
+        }
+    }
+
+    #[test]
+    fn elf32_maps_code_and_reads_build_id_without_elf64_offsets() {
+        let mut image = vec![0_u8; 0x200];
+        image[..6].copy_from_slice(b"\x7fELF\x01\x01");
+        image[18..20].copy_from_slice(&40_u16.to_le_bytes());
+        image[28..32].copy_from_slice(&52_u32.to_le_bytes());
+        image[42..44].copy_from_slice(&32_u16.to_le_bytes());
+        image[44..46].copy_from_slice(&2_u16.to_le_bytes());
+        let load = &mut image[52..84];
+        load[0..4].copy_from_slice(&1_u32.to_le_bytes());
+        load[4..8].copy_from_slice(&0x100_u32.to_le_bytes());
+        load[8..12].copy_from_slice(&0x4000_u32.to_le_bytes());
+        load[16..20].copy_from_slice(&0x80_u32.to_le_bytes());
+        load[24..28].copy_from_slice(&5_u32.to_le_bytes());
+        let note = &mut image[84..116];
+        note[0..4].copy_from_slice(&4_u32.to_le_bytes());
+        note[4..8].copy_from_slice(&0x180_u32.to_le_bytes());
+        note[16..20].copy_from_slice(&20_u32.to_le_bytes());
+        image[0x180..0x184].copy_from_slice(&4_u32.to_le_bytes());
+        image[0x184..0x188].copy_from_slice(&4_u32.to_le_bytes());
+        image[0x188..0x18c].copy_from_slice(&3_u32.to_le_bytes());
+        image[0x18c..0x190].copy_from_slice(b"GNU\0");
+        image[0x190..0x194].copy_from_slice(&[1, 2, 3, 4]);
+        let mut file = NamedTempFile::new().unwrap();
+        file.write_all(&image).unwrap();
+        file.flush().unwrap();
+        let mut opened = File::open(file.path()).unwrap();
+        assert_eq!(elf_rva_to_file_offset(&mut opened, 0x4010, 16).unwrap(), 0x110);
+        assert!(elf_rva_to_file_offset(&mut opened, 0x4078, 16).is_err());
+        assert_eq!(elf_gnu_build_id(file.path()).unwrap(), "01020304");
+        // Reject a segment that claims bytes beyond the actual file.
+        image[68..72].copy_from_slice(&0x1000_u32.to_le_bytes());
+        fs::write(file.path(), &image).unwrap();
+        assert!(elf_programs(&mut File::open(file.path()).unwrap()).is_err());
+    }
 
     #[test]
     fn il2cpp_runtime_rva_is_mapped_through_executable_load_segment() {

@@ -42,6 +42,20 @@ HTTPServer((host, int(port)), Handler).serve_forever()
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_android_profile_selection_is_explicit_and_fail_closed(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "compatibility.json"
+            base = {"compatibilityManifest": str(path)}
+            for abi, kind, name in [("arm64-v8a", "patch-android-arm64", "8.0.0.json"),
+                                    ("armeabi-v7a", "patch-android-armv7", "8.0.0-armv7.json")]:
+                path.write_text(json.dumps({"source": {"abi": abi}}))
+                self.assertEqual(m.runtime_profile(base), (abi, kind, name))
+            path.write_text('{"source":{"abi":"x86"}}')
+            with self.assertRaises(ValueError):
+                m.runtime_profile(base)
+            path.write_text('{"source":{}}')
+            self.assertEqual(m.runtime_profile(base)[0], "arm64-v8a")
+
     def test_old_worker_capability_rejected_without_starting_service(self):
         import subprocess
         with patch.object(m.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, '{"lanProxy":true}', "")) as run:

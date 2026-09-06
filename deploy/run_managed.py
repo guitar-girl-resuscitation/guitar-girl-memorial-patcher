@@ -130,8 +130,22 @@ def download(item, directory, expected_files, kind):
     return manifest
 
 
-def verify_runtime(directory):
+def runtime_profile(base):
+    # The source manifest is authoritative: never silently replace a V7 runtime
+    # with the historical ARM64 default during an unattended update.
+    profile = json.loads(Path(base["compatibilityManifest"]).read_text(encoding="utf-8"))
+    abi = profile["source"].get("abi", "arm64-v8a")
+    profiles = {"arm64-v8a": ("patch-android-arm64", "8.0.0.json"),
+                "armeabi-v7a": ("patch-android-armv7", "8.0.0-armv7.json")}
+    if abi not in profiles:
+        raise ValueError("unsupported source Android ABI")
+    return (abi, *profiles[abi])
+
+
+def verify_runtime(directory, expected_abi="arm64-v8a"):
     dependencies = json.loads((directory / "dependencies.json").read_text())
+    if dependencies.get("androidAbi", "arm64-v8a") != expected_abi or dependencies["server"].get("androidAbi", "arm64-v8a") != expected_abi:
+        raise ValueError("runtime Android ABI mismatch")
     if dependencies.get("schema") != 1 or dependencies["server"]["serverAbi"] != 1:
         raise ValueError("unsupported runtime ABI")
     if digest(directory / "libggfm_server.so") != dependencies["server"]["sha256"].upper():
@@ -178,8 +192,9 @@ def stage(root, base, worker_release, patch_release, previous_revision):
         if not supports_lan_proxy(binary):
             log("Skipping release: worker lacks LAN proxy capability; active service remains online")
             raise ValueError("release lacks LAN proxy support; keeping active worker without interruption")
-    download(patch_release, patch_dir, PATCH_FILES, "patch-android-arm64")
-    dependencies = verify_runtime(patch_dir)
+    abi, kind, profile_name = runtime_profile(base)
+    download(patch_release, patch_dir, PATCH_FILES, kind)
+    dependencies = verify_runtime(patch_dir, abi)
     source = root / "sources" / patch_release["commit"]
     if not source.exists():
         source.mkdir(parents=True)
@@ -221,7 +236,9 @@ def stage(root, base, worker_release, patch_release, previous_revision):
             ("serverSo", "serverSha256", "libggfm_server.so")]:
         artifacts[field] = str(patch_dir / filename)
         artifacts[hash_field] = digest(patch_dir / filename)
-    config["compatibilityManifest"] = str(source / "compatibility/8.0.0.json")
+    config["compatibilityManifest"] = str(source / "compatibility" / profile_name)
+    if runtime_profile(config)[0] != abi:
+        raise ValueError("updated source profile changed Android ABI")
     old_lock = Path(base["artifacts"]["patchRoot"]) / "tools/requirements.lock.txt"
     new_lock = source / "tools/requirements.lock.txt"
     if not old_lock.is_file() or digest(old_lock) != digest(new_lock):
@@ -398,7 +415,7 @@ def main():
                 candidate_child = None
                 try:
                     worker_release = release(WORKER, "ggfm-patcher-linux-x64.zip")
-                    patch_release = release(PATCH, "ggfm-patch-android-arm64.zip")
+                    patch_release = release(PATCH, "ggfm-" + runtime_profile(base)[1] + ".zip")
                     pair = worker_release["asset"]["digest"] + "/" + patch_release["asset"]["digest"]
                     if pair != state.get("pair"):
                         log("Verified-release update found; staging immutable runtime")

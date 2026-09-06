@@ -435,6 +435,7 @@ async fn update_info(State(state): State<AppState>) -> Json<serde_json::Value> {
         "applicationId": state.config.application_id.as_deref()
             .unwrap_or(&state.compatibility.output.application_id),
         "signerSha256": state.config.signing.fingerprint,
+        "androidAbi": state.compatibility.source.abi,
         "versionCode": version.version_code,
         "versionName": version.version_name,
     }))
@@ -880,7 +881,13 @@ mod tests {
             state.config.application_id.as_ref().unwrap().as_str()
         );
         assert_eq!(info["signerSha256"], state.config.signing.fingerprint);
+        assert_eq!(info["androidAbi"], "arm64-v8a");
         assert_eq!(status.android_version.revision, revision);
+        Arc::make_mut(&mut state.compatibility).source.abi =
+            serde_json::from_value(serde_json::json!("armeabi-v7a")).unwrap();
+        let Json(v7) = update_info(State(state)).await;
+        assert_eq!(v7["androidAbi"], "armeabi-v7a");
+        assert_eq!(v7["versionCode"], info["versionCode"]);
     }
 
     #[tokio::test]

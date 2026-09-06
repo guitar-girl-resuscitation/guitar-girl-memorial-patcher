@@ -21,12 +21,36 @@ pub struct CompatibilityManifest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Source {
+    #[serde(default)]
+    pub abi: AndroidAbi,
     pub version: String,
     pub xapk_sha256: String,
     pub splits: Vec<SplitDigest>,
     pub il2cpp: NativeDigest,
     pub global_metadata: FileDigest,
     pub master_bundle: FileDigest,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub enum AndroidAbi {
+    #[default]
+    #[serde(rename = "arm64-v8a")]
+    Arm64,
+    #[serde(rename = "armeabi-v7a")]
+    ArmV7,
+}
+
+impl AndroidAbi {
+    pub fn split_name(self) -> &'static str {
+        match self { Self::Arm64 => "config.arm64_v8a.apk", Self::ArmV7 => "config.armeabi_v7a.apk" }
+    }
+    pub fn library(self, name: &str) -> String {
+        let directory = match self { Self::Arm64 => "arm64-v8a", Self::ArmV7 => "armeabi-v7a" };
+        format!("lib/{directory}/{name}")
+    }
+    pub fn elf_identity(self) -> (u8, u16) {
+        match self { Self::Arm64 => (2, 183), Self::ArmV7 => (1, 40) }
+    }
 }
 
 #[derive(Clone, Debug, Deserialize)]

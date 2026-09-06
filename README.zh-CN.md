@@ -1,5 +1,7 @@
 # Guitar Girl Memorial Patcher
 
+架构支持与原包限制见：[Android 架构选择](docs/ANDROID_ABI.md)。
+
 [English](README.md) · 简体中文
 
 为 **Guitar Girl Fan Memorial Build** 提供严格校验的 CLI 和单 worker 网页补丁工具，将用户提供的受支持原版 XAPK 制作成带内建 Rust 服务端的独立纪念版。

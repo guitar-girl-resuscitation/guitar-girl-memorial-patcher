@@ -11,6 +11,8 @@ import subprocess
 import zipfile
 
 KINDS = {
+    "server-android-armv7": {"libggfm_server.so", "ggfm_server.h", "memorial-policy.json", "THIRD_PARTY_TERMINAL_FONT.md"},
+    "patch-android-armv7": {"classes.dex", "libggfm_bootstrap.so", "libdobby.so", "libggfm_server.so", "THIRD_PARTY_TERMINAL_FONT.md", "memorial-policy.v1.json", "DOBBY-LICENSE", "dependencies.json"},
     "patcher-docker-linux-amd64": {"Dockerfile", "prepare.py", "entrypoint.py", "healthcheck.py",
         "docker-lock.json", "ggfm-patcher", "ggfm-patcher-web", "classes.dex",
         "libggfm_bootstrap.so", "libdobby.so", "libggfm_server.so", "dependencies.json",
