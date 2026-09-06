@@ -14,6 +14,8 @@ import os
 from pathlib import Path
 import re
 import signal
+import secrets
+import socket
 import subprocess
 import sys
 import time
@@ -306,6 +308,8 @@ def stage(root, base, worker_release, patch_release, previous_revision, suppleme
 def child_env(generation):
     env = dict(os.environ, GGFM_PATCHER_CONFIG=generation["config"])
     env.pop("GGFM_PREPARE_ONLY", None)
+    if "port" in generation:
+        env["GGFM_ROUTE_REVISION"] = str(generation["revision"])
     return env
 
 
@@ -360,7 +364,10 @@ def health_url(listen):
 
 def ready(generation, child):
     config = json.loads(Path(generation["config"]).read_text())
-    headers = {"CF-Connecting-IP": "127.0.0.1"}
+    headers = {"CF-Connecting-IP": "127.0.0.1", "x-real-ip": "127.0.0.1",
+               "x-ggfm-client-ip": "127.0.0.1"}
+    if os.environ.get("GGFM_GATEWAY_KEY"):
+        headers["x-ggfm-gateway-key"] = os.environ["GGFM_GATEWAY_KEY"]
     origin = config.get("security", {}).get("publicOrigin")
     if origin:
         headers["Host"] = origin.split("://", 1)[1]
@@ -370,7 +377,8 @@ def ready(generation, child):
             request = urllib.request.Request(health_url(config["listen"]), headers=headers)
             with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=3) as response:
                 status = json.loads(response.read(8192))
-                if status.get("ok"):
+                expected_revision = generation.get("revision", 0) if "port" in generation else 0
+                if status.get("ok") and (not expected_revision or status.get("androidVersion", {}).get("revision") == expected_revision):
                     return status
         except (OSError, ValueError):
             pass
@@ -418,13 +426,142 @@ def activate(candidate, active, child, state, state_path, pair):
         return active, child
 
 
+def supports_blue_green(binary):
+    try:
+        result = subprocess.run([str(binary), "--network-capabilities"], capture_output=True,
+                                text=True, check=True, timeout=10)
+        return json.loads(result.stdout).get("blueGreen") is True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
+class BlueGreen:
+    """Stable ingress + at most two worker processes. Only the ingress reads
+    public headers. Backends use private ports and an ephemeral shared secret.
+    """
+    def __init__(self, root, base, binary, settle=30, retain=780):
+        self.root, self.base, self.binary = root, base, binary
+        self.settle, self.retain = settle, retain
+        self.routes = root / "routes.json"
+        self.retired = None
+        self.gateway = None
+        self.legacy = None
+        os.environ["GGFM_GATEWAY_KEY"] = secrets.token_hex(32)
+        os.environ["GGFM_BUILD_LOCK"] = str(root / "heavy-build.lock")
+
+    def backend(self, generation):
+        with socket.socket() as listener:
+            listener.bind(("127.0.0.1", 0))
+            port = listener.getsockname()[1]
+        config = json.loads(Path(generation["config"]).read_text())
+        config["listen"] = f"127.0.0.1:{port}"
+        config.setdefault("security", {}).update(trustedProxies=["127.0.0.1/32"],
+            clientIpHeader="x-ggfm-client-ip", requireTrustedProxy=True, allowLanProxy=False)
+        path = self.root / f"runtime-{generation['revision']}-{port}.json"
+        atomic_json(path, config)
+        return dict(generation, config=str(path), port=port)
+
+    def publish(self, active, old=None):
+        targets = {str(active["revision"]): active["port"]}
+        if old:
+            targets[str(old["revision"])] = old["port"]
+        atomic_json(self.routes, {"active": active["revision"], "targets": targets,
+                                  "legacy": self.legacy if str(self.legacy) in targets else None})
+
+    def start_gateway(self, active):
+        self.publish(active)
+        path = self.root / "gateway-config.json"
+        atomic_json(path, self.base)
+        env = dict(os.environ, GGFM_PATCHER_CONFIG=str(path), GGFM_GATEWAY_ROUTES=str(self.routes))
+        self.gateway = subprocess.Popen([str(self.binary), "--gateway"], env=env)
+
+    def activate(self, candidate, active, child, state, state_path, pair):
+        if not supports_blue_green(candidate["binary"]):
+            log("Candidate lacks shared build lock/routing capability; retaining old worker")
+            return active, child
+        candidate = self.backend(candidate)
+        new_child = None
+        try:
+            # Prebuild happens inside startup, under the cross-process lock.
+            # The old process and its streamed downloads remain untouched.
+            new_child = start(candidate)
+            if not ready(candidate, new_child):
+                raise RuntimeError("candidate failed readiness")
+            deadline = time.monotonic() + self.settle
+            while time.monotonic() < deadline:
+                if STOP or new_child.poll() is not None:
+                    raise RuntimeError("candidate exited during stabilization")
+                # Do not accept a process which merely bound the port once.
+                if not ready(candidate, new_child):
+                    raise RuntimeError("candidate health became unstable")
+                time.sleep(min(1, max(0, deadline - time.monotonic())))
+            if STOP:
+                raise RuntimeError("shutdown requested before cutover")
+            published = dict(state, previous=active, active=candidate, pair=pair)
+            atomic_json(state_path, published)
+            try:
+                self.publish(candidate, active)
+            except Exception:
+                atomic_json(state_path, state)
+                raise
+            self.retired = (active, child, time.monotonic(), time.monotonic(), state.get("pair"))
+            state.clear()
+            state.update(published)
+            log(f"READY: revision {candidate['revision']}; traffic switched after {self.settle}s stable health; old tokens retained")
+            return candidate, new_child
+        except Exception as error:
+            log(f"Candidate rejected ({type(error).__name__}); old worker never stopped")
+            stop(new_child)
+            return active, child
+
+    def maintain(self, active, child, state, state_path):
+        if self.gateway.poll() is not None:
+            raise RuntimeError("stable gateway exited")
+        if child.poll() is not None:
+            if not self.retired or self.retired[1].poll() is not None:
+                raise RuntimeError("active worker exited without healthy rollback target")
+            old, old_child, _, _, old_pair = self.retired
+            self.publish(old)
+            state.update(active=old, pair=old_pair)
+            atomic_json(state_path, state)
+            self.retired = None
+            log("Active worker exited; traffic rolled back to retained worker")
+            return old, old_child
+        if self.retired:
+            old, old_child, since, last_busy, old_pair = self.retired
+            stats = self.routes.with_suffix(".stats.json")
+            try:
+                counts = json.loads(stats.read_text())
+                fresh = time.time() - stats.stat().st_mtime < 5
+                busy = counts.get(str(old["revision"]), 0) != 0
+            except (OSError, ValueError):
+                fresh, busy = False, True
+            now = time.monotonic()
+            if busy or not fresh:
+                last_busy = now
+            self.retired = (old, old_child, since, last_busy, old_pair)
+            # Challenges live 180s, download tokens 600s; a long request may
+            # finish later and issue another token. Keep 600 quiet seconds too.
+            if fresh and not busy and now - since >= self.retain and now - last_busy >= 600:
+                self.publish(active)
+                stop(old_child)  # graceful drain is a final safety net
+                self.retired = None
+                log("Retired worker drained; expired token window closed")
+        return active, child
+
+    def close(self):
+        stop(self.gateway)
+        if self.retired:
+            stop(self.retired[1])
+
+
 def main():
     import fcntl
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, required=True)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--state", type=Path, required=True)
-    parser.add_argument("--interval", type=int, default=3600)
+    parser.add_argument("--interval", type=int, default=300)
     parser.add_argument("--no-updates", action="store_true",
                         default=os.environ.get("GGFM_AUTO_UPDATE", "1") == "0",
                         help="keep supervising the active generation without polling releases")
@@ -451,6 +588,18 @@ def main():
         STOP = True
     signal.signal(signal.SIGTERM, stopping)
     signal.signal(signal.SIGINT, stopping)
+    gateway_binary = args.binary.parent / "ggfm-gateway"
+    if gateway_binary.is_file():
+        gateway_binary.chmod(0o755)
+        if not supports_blue_green(gateway_binary):
+            raise RuntimeError("installed gateway is incompatible; restore the verified overlay binary")
+    if not gateway_binary.is_file() and supports_blue_green(args.binary):
+        gateway_binary = args.binary
+    blue = BlueGreen(root, base, gateway_binary) if gateway_binary.is_file() and supports_blue_green(gateway_binary) else None
+    if blue:
+        if not supports_blue_green(active["binary"]):
+            blue.legacy = active["revision"]
+        active = blue.backend(active)
     child = start(active)
     try:
         initial = ready(active, child)
@@ -463,9 +612,14 @@ def main():
                 state["counter"] = max(state["counter"], int(path.stem))
         state["active"] = active
         atomic_json(state_path, state)
+        if blue:
+            blue.start_gateway(active)
+            log("Stable ingress enabled; updates keep old downloads online")
         next_check = 0
         while not STOP:
-            if child.poll() is not None:
+            if blue:
+                active, child = blue.maintain(active, child, state, state_path)
+            elif child.poll() is not None:
                 raise RuntimeError("active worker exited; service manager may restart this supervisor")
             if not args.no_updates and time.monotonic() >= next_check:
                 next_check = time.monotonic() + args.interval
@@ -480,13 +634,16 @@ def main():
                         if supplement_release["commit"] != patch_release["commit"]:
                             raise ValueError("ARM release pair changed; retaining active generation")
                         pair += "/universal-arm-v1/" + supplement_release["asset"]["digest"]
-                    if pair != state.get("pair"):
+                    if pair != state.get("pair") and not (blue and blue.retired):
                         log("Verified-release update found; staging immutable runtime")
                         candidate = stage(root, base, worker_release, patch_release, state["counter"], supplement_release)
                         state["counter"] = candidate["revision"]
                         atomic_json(state_path, state)  # never reuse an allocated Android version
-                        log("Draining worker before rebuilding operator XAPK; signing identity is unchanged")
-                        active, child = activate(candidate, active, child, state, state_path, pair)
+                        log("Preparing update; signing identity is unchanged")
+                        if blue:
+                            active, child = blue.activate(candidate, active, child, state, state_path, pair)
+                        else:
+                            active, child = activate(candidate, active, child, state, state_path, pair)
                 except Exception as error:
                     log(f"Update not activated ({type(error).__name__}); retaining previous generation")
                     if candidate_child is not None:
@@ -497,6 +654,8 @@ def main():
                             raise RuntimeError("previous generation failed to restart")
             time.sleep(1)
     finally:
+        if blue:
+            blue.close()
         stop(child)
         lock.close()
 

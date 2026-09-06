@@ -175,7 +175,7 @@ Keep the same package ID and signing key for in-place Android updates. See
 
 [Releases](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher/releases) provide `ggfm-patcher-linux-x64.zip` and its SHA-256 file. Successful main builds replace the single Nightly; version tags create versioned releases. Archives contain packaging tools, not game packages or private keys.
 
-The upstream-update workflow runs every six hours or manually. It verifies a published Patch release, updates only the pinned gitlink and dependency record, tests the change, then dispatches a new build. It does **not** update a running deployment, replace a signing key or install anything on a player's phone. Operators deploy matched versions deliberately.
+The upstream-update workflow runs every six hours or manually. It updates the reviewed Patch pin and builds a release. Separately, the managed deployment checks releases every five minutes. With the [stable gateway](docs/BLUE_GREEN.md), candidates build in the background and switch after 30 seconds of healthy startup; old downloads remain on their original worker. Neither mechanism replaces signing keys or installs updates on phones.
 
 ## Testing and troubleshooting
 

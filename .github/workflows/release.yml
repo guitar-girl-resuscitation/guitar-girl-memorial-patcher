@@ -49,6 +49,10 @@ jobs:
           python -m unittest discover -s tests -v
       - name: Compile CLI and web service
         run: cargo build --workspace --locked --release -j2
+      - name: Streaming blue-green cutover and rollback
+        env:
+          GGFM_TEST_GATEWAY: target/release/ggfm-patcher-web
+        run: python tools/test_bluegreen.py
       - name: Verify additive LAN hotfix installer
         run: python tools/test_lan_installer.py
       - name: Fetch verified precompiled Patch and Server runtime

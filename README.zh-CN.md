@@ -171,7 +171,7 @@ Android 版本绑定发布构建：第 N 次 workflow 运行生成 `versionCode 
 
 [Releases](https://github.com/guitar-girl-resuscitation/guitar-girl-memorial-patcher/releases) 提供 `ggfm-patcher-linux-x64.zip` 及 SHA-256 文件。main 构建成功后替换唯一 Nightly；标签生成版本化 Release。压缩包只有打包工具，不含游戏或私钥。
 
-上游更新 workflow 每六小时或手动执行：验证已发布的 Patch，更新固定 gitlink 和依赖记录，测试后触发新构建。它**不会**更新正在运行的部署、替换签名密钥或给玩家手机安装应用；部署者应有计划地部署匹配版本。
+上游更新 workflow 每六小时或手动执行，更新审核后的 Patch 引用并构建发布。部署内的更新器另外每五分钟检查一次发布；启用[常驻入口](docs/BLUE_GREEN.md)后，新版后台构建、连续健康 30 秒后切流，旧下载继续走旧实例。二者都不会替换签名密钥或替玩家手机安装更新。
 
 ## 测试和排错
 

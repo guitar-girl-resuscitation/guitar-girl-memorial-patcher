@@ -31,6 +31,7 @@ use tokio::{
 use tokio_util::io::ReaderStream;
 
 mod security;
+mod gateway;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -189,13 +190,16 @@ impl IntoResponse for WebError {
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("--network-capabilities") {
-        println!("{{\"lanProxy\":true,\"universalArm\":true,\"apiVersion\":1}}");
+        println!("{{\"lanProxy\":true,\"universalArm\":true,\"blueGreen\":true,\"apiVersion\":1}}");
         return Ok(());
     }
     tracing_subscriber::fmt()
         .with_ansi(false)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
+    if std::env::args().nth(1).as_deref() == Some("--gateway") {
+        return gateway::serve().await;
+    }
     let config_path = std::env::var_os("GGFM_PATCHER_CONFIG")
         .ok_or("GGFM_PATCHER_CONFIG must name the deployment configuration")?;
     let mut config: Config = serde_json::from_slice(&fs::read(config_path)?)?;
@@ -244,7 +248,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .layer(axum::middleware::from_fn_with_state(
             security,
             security::protect,
-        ));
+        ))
+        .layer(axum::middleware::from_fn(gateway::worker_guard));
     let listener = tokio::net::TcpListener::bind(address).await?;
     tracing::info!(listen = %listener.local_addr()?, "HTTP listener ready");
     axum::serve(
@@ -571,16 +576,17 @@ async fn issue_challenge(
             "challenge capacity reached; retry later".into(),
         ));
     }
-    let (challenge_state, challenge) =
+    let (challenge_state, mut challenge) =
         ChallengeState::issue(&prebuilt.source, 64 * 1024, 8, unix_now(), 180)
             .map_err(|error| WebError(StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    challenge.nonce = gateway::tag_token(&challenge.nonce);
     challenges.insert(challenge.nonce.clone(), challenge_state);
     Ok(Json(challenge))
 }
 
 async fn prove_challenge(
     State(state): State<AppState>,
-    Json(request): Json<ProofRequest>,
+    Json(mut request): Json<ProofRequest>,
 ) -> Result<Json<PatchReady>, WebError> {
     let prebuilt = state.prebuilt.as_ref().ok_or_else(|| {
         WebError(
@@ -599,6 +605,7 @@ async fn prove_challenge(
                 "unknown or consumed challenge".into(),
             )
         })?;
+    request.proof.nonce = gateway::untag_token(&request.proof.nonce).to_owned();
     challenge
         .verify(&request.proof, unix_now())
         .map_err(proof_error)?;
@@ -658,6 +665,9 @@ fn build_or_reuse(
     application_id: Option<&str>,
     revision: u32,
 ) -> Result<(String, PathBuf), String> {
+    // Shared across blue/green processes, including operator prebuilds. The
+    // open file owns the OS lock through success, errors and cancellation.
+    let _global_build = gateway::build_lock().map_err(|error| error.to_string())?;
     let verified = verify_xapk(source, &state.compatibility, Limits::default())
         .map_err(|error| error.to_string())?;
     let versions = ArtifactVersions {
@@ -788,7 +798,7 @@ async fn grant_download(
     cache_key: String,
     path: PathBuf,
 ) -> Result<Json<PatchReady>, WebError> {
-    let token = random_token()?;
+    let token = gateway::tag_token(&random_token()?);
     let expires_at = unix_now() + 600;
     let mut downloads = state.downloads.lock().await;
     downloads.retain(|_, grant| grant.expires_at >= unix_now());

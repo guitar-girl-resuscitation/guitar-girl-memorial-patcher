@@ -19,6 +19,7 @@ tokio.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
+reqwest = { version = "0.12", default-features = false, features = ["stream"] }
 
 [dev-dependencies]
 base64.workspace = true

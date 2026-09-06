@@ -118,7 +118,7 @@ Keep configuration, source XAPK, signing directory, cache **and update state**
 on persistent storage. Docker uses `/data/updates`; never recreate `/data` when
 updating. Set Docker `--stop-timeout 3600` so an active patch job can drain.
 
-The supervisor checks GitHub at startup and hourly. It verifies immutable asset
+The supervisor checks GitHub at startup and every five minutes. It verifies immutable asset
 IDs, GitHub SHA-256, every archive member, exact source commits and Server/policy
 pairing. Patch-only changes reuse the worker; worker-only changes reuse the
 runtime. Native libraries are downloaded precompiled, never rebuilt per user.
@@ -128,10 +128,13 @@ Python and OS dependencies remain the base deployment's responsibility: an
 incompatible worker API is rejected rather than silently upgrading the OS.
 
 Each candidate reserves a monotonically increasing Android revision on disk.
-The worker drains, then the candidate prebuilds the optional operator XAPK.
-Only after prebuild and health checks succeed does the supervisor publish the
-new generation. Failure restarts the previous generation; failed revisions
-are not reused. A change of package ID, signer or origin is rejected on restart.
+With the [stable ingress](BLUE_GREEN.md), the old worker keeps serving while the
+candidate prebuilds the optional operator XAPK under a shared OS build lock.
+After 30 seconds of stable health, new traffic switches; old challenges, tokens
+and streams still reach the old worker until drained. Failure leaves the old
+worker online; failed revisions are not reused. Legacy entries without a gateway
+still have a maintenance window: install the incremental gateway overlay once.
+A change of package ID, signer or origin is rejected on restart.
 There is a maintenance interval during rebuild, not zero-downtime service.
 The immutable generation configuration and last active pair survive restart.
 
@@ -151,8 +154,9 @@ download or restart. Keep `versions.revision` unset in numbered releases;
 
 Docker 默认使用独立入口自动检查 Patcher 与 Patch 的 GitHub 发布。
 仅 Patch 更新时直接复用已编译 worker；仅 Patcher 更新时复用运行时。
-新版先校验哈希与版本，再等待旧任务结束，预构建部署者原包，通过健康检查后
-才启用。失败回退旧版本；期间会有维护窗口。每次有效候选分配持久化的递增
+新版先校验哈希与版本，通过跨进程构建锁后台预构建原包，连续健康 30 秒后切流，
+旧下载和令牌保留到排空；失败继续服务旧版。旧部署需要先安装一次常驻入口
+增量包；未装入口仍有维护窗口。详见 [持续服务更新](BLUE_GREEN.md)。每次有效候选分配持久化的递增
 版本号，不随访客下载或进程重启增加，失败版本号也不复用。
 
 原包、签名密钥、配置、缓存及 `/data/updates` 必须持久化，不能升级时清空。

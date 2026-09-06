@@ -453,7 +453,10 @@ pub async fn protect(
     response_headers(&mut response, security.authority.is_some());
     response
 }
-async fn protect_inner(security: Arc<Security>, request: Request, next: Next) -> Response {
+#[derive(Clone, Copy)]
+pub struct ResolvedClientIp(pub IpAddr);
+
+async fn protect_inner(security: Arc<Security>, mut request: Request, next: Next) -> Response {
     let Some(peer) = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -469,6 +472,7 @@ async fn protect_inner(security: Arc<Security>, request: Request, next: Next) ->
         Ok(ip) => ip,
         Err(r) => return *r,
     };
+    request.extensions_mut().insert(ResolvedClientIp(ip));
     let class = Class::of(request.uri().path());
     let permit = match security.permits.clone().try_acquire_owned() {
         Ok(p) => p,
