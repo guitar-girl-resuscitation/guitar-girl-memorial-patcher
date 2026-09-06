@@ -590,7 +590,8 @@ def main():
     signal.signal(signal.SIGINT, stopping)
     gateway_binary = args.binary.parent / "ggfm-gateway"
     if gateway_binary.is_file():
-        gateway_binary.chmod(0o755)
+        if not os.access(gateway_binary, os.X_OK):
+            gateway_binary.chmod(0o755)
         if not supports_blue_green(gateway_binary):
             raise RuntimeError("installed gateway is incompatible; restore the verified overlay binary")
     if not gateway_binary.is_file() and supports_blue_green(args.binary):
