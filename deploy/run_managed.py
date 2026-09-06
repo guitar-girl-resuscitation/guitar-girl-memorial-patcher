@@ -456,7 +456,7 @@ class BlueGreen:
         config = json.loads(Path(generation["config"]).read_text())
         config["listen"] = f"127.0.0.1:{port}"
         config.setdefault("security", {}).update(trustedProxies=["127.0.0.1/32"],
-            clientIpHeader="x-ggfm-client-ip", requireTrustedProxy=True, allowLanProxy=False)
+            clientIpHeader="cf-connecting-ip", requireTrustedProxy=True, allowLanProxy=False)
         path = self.root / f"runtime-{generation['revision']}-{port}.json"
         atomic_json(path, config)
         return dict(generation, config=str(path), port=port)

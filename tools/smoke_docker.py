@@ -30,7 +30,7 @@ def ready(cid):
 
 
 def main(image):
-    cid = output("docker", "run", "--rm", "-d", "--cpus", "2", "--memory", "4g",
+    cid = output("docker", "run", "-d", "--cpus", "2", "--memory", "4g",
                  "--pids-limit", "160", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
                  "-p", "127.0.0.1::8080", "-e", "GGFM_PUBLIC_ORIGIN=https://patch.example.org",
                  "-e", "GGFM_AUTO_UPDATE=0", image)
@@ -45,10 +45,12 @@ def main(image):
         assert output("docker", "exec", cid, "cat", "/data/signing/identity.json") == identity
         print("Docker smoke: upload-only healthy, embedded version verified, signing identity survives restart")
     finally:
-        # Only the container ID just created by this test; --rm owns its temporary volume.
+        # Keep failed startup logs until after inspection. This exact test-owned
+        # container (and only its anonymous volumes) is then removed.
         subprocess.run(["docker", "logs", cid], check=False)
         subprocess.run(["docker", "inspect", "--format", "{{.Id}}", cid], check=False)
         subprocess.run(["docker", "stop", "--time", "30", cid], check=False)
+        subprocess.run(["docker", "rm", "-v", cid], check=False)
 
 
 if __name__ == "__main__":

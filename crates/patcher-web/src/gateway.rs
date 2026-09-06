@@ -86,6 +86,9 @@ async fn forward(State(state): State<Gateway>, mut request: Request) -> Result<R
     let mut headers = parts.headers;
     clean_headers(&mut headers);
     headers.insert("x-ggfm-client-ip", ip.to_string().parse().map_err(internal)?);
+    // Backend's existing strict ingress contract only accepts this header.
+    // Always replace it with the identity already validated at the gateway.
+    headers.insert("cf-connecting-ip", ip.to_string().parse().map_err(internal)?);
     headers.insert("x-ggfm-gateway-key", state.key.parse().map_err(internal)?);
     let response = state.client.request(parts.method, target).headers(headers)
         .body(reqwest::Body::wrap_stream(body.into_data_stream())).send().await.map_err(internal)?;
@@ -134,6 +137,16 @@ pub async fn serve() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn private_worker_network_is_accepted_by_existing_security_contract() {
+        let mut config: security::SecurityConfig = serde_json::from_value(serde_json::json!({
+            "publicOrigin": "https://example.org", "trustedProxies": ["127.0.0.1/32"],
+            "clientIpHeader": "cf-connecting-ip", "requireTrustedProxy": true, "allowLanProxy": false
+        })).unwrap();
+        security::Security::new(config.clone()).unwrap().validate_listen("127.0.0.1:12345".parse().unwrap()).unwrap();
+        config.client_ip_header = "x-ggfm-client-ip".into();
+        assert!(security::Security::new(config).is_err());
+    }
     #[test]
     fn lock_child() {
         if let Ok(marker) = std::env::var("GGFM_TEST_LOCK_MARKER") {
