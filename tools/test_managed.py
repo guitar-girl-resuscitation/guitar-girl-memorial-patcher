@@ -42,6 +42,38 @@ HTTPServer((host, int(port)), Handler).serve_forever()
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_old_worker_capability_rejected_without_starting_service(self):
+        import subprocess
+        with patch.object(m.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, '{"lanProxy":true}', "")) as run:
+            self.assertTrue(m.supports_lan_proxy(Path("worker")))
+            self.assertNotIn("GGFM_PATCHER_CONFIG", run.call_args.kwargs["env"])
+        with patch.object(m.subprocess, "run", side_effect=subprocess.CalledProcessError(1, [])):
+            self.assertFalse(m.supports_lan_proxy(Path("old-worker")))
+
+    def test_network_overlay_preserves_generation_identity(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "17.json"
+            original = {"listen": "127.0.0.1:19078", "deploymentRevision": 17,
+                        "applicationId": "original", "security": {"publicOrigin": "https://example.org"}}
+            path.write_text(json.dumps(original))
+            base = {"listen": "0.0.0.0:19078", "deploymentRevision": 15,
+                    "security": {"allowLanProxy": True, "trustedProxies": ["10.0.0.1/32"]}}
+            result = m.inherit_network(base, {"config": str(path), "binary": "worker17", "revision": 17}, root)
+            loaded = json.loads(Path(result["config"]).read_text())
+            self.assertEqual(json.loads(path.read_text()), original)
+            self.assertEqual(loaded["listen"], base["listen"])
+            self.assertEqual(loaded["deploymentRevision"], 17)
+            self.assertEqual(loaded["applicationId"], "original")
+            self.assertEqual(result["binary"], "worker17")
+            self.assertTrue(loaded["security"]["allowLanProxy"])
+            self.assertEqual(loaded["security"]["publicOrigin"], "https://example.org")
+
+    def test_health_uses_connectable_loopback_for_wildcards(self):
+        self.assertEqual(m.health_url("0.0.0.0:19078"), "http://127.0.0.1:19078/healthz")
+        self.assertEqual(m.health_url("[::]:19078"), "http://[::1]:19078/healthz")
+        self.assertEqual(m.health_url("10.0.100.8:19078"), "http://10.0.100.8:19078/healthz")
+
     def test_historical_seed_requires_an_explicit_version_floor(self):
         with tempfile.TemporaryDirectory(prefix="ggfm-seed-test-") as tmp:
             config = Path(tmp) / "seed.json"
@@ -137,6 +169,13 @@ class ProcessCutoverTests(unittest.TestCase):
         m.stop(child)
         restarted = m.start(persisted["active"])
         self.assertEqual(m.ready(persisted["active"], restarted)["androidVersion"]["revision"], 9)
+
+    def test_wildcard_health_ignores_environment_proxy(self):
+        m.stop(self.child)
+        candidate = self.generation(9, listen=f"0.0.0.0:{self.port}")
+        child = m.start(candidate)
+        with patch.dict(os.environ, {"http_proxy": "http://127.0.0.1:1", "HTTP_PROXY": "http://127.0.0.1:1", "no_proxy": "", "NO_PROXY": ""}):
+            self.assertEqual(m.ready(candidate, child)["androidVersion"]["revision"], 9)
 
     def assert_rollback(self, candidate):
         active, child = m.activate(candidate, self.old, self.child, self.state, self.state_path, "new")

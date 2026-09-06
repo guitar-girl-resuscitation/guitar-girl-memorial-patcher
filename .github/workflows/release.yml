@@ -41,6 +41,7 @@ jobs:
         run: |
           cargo test --workspace --locked -j2
           node tools/test-browser-sha256.mjs
+          node tools/test-browser-i18n.mjs
           python tools/test_deployment.py
           python tools/test_docker.py
           python tools/test_managed.py
@@ -48,6 +49,8 @@ jobs:
           python -m unittest discover -s tests -v
       - name: Compile CLI and web service
         run: cargo build --workspace --locked --release -j2
+      - name: Verify additive LAN hotfix installer
+        run: python tools/test_lan_installer.py
       - name: Fetch verified precompiled Patch and Server runtime
         run: python tools/fetch_runtime.py --output build/docker-runtime
       - name: Package original software only

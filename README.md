@@ -192,3 +192,11 @@ This is an unofficial fan memorial/interoperability project, not an official ser
 Project code is licensed under [AGPL-3.0-or-later](LICENSE); third-party components retain their own licenses. This does not license the original game. Supply only an original package you are entitled to use.
 
 Do not submit APK/XAPK files, AssetBundles, original DEX/IL2CPP binaries, full decompiler exports, captured proprietary master tables, private saves or signing secrets. Report bugs with the component version/commit, chapter, reproducible steps and redacted diagnostic logs. For behavior changes, add a contract/regression test and keep both README languages in sync.
+
+## Web language
+
+The Patcher website supports English and Simplified Chinese, automatically
+selects a language from the browser, and remembers the language selector choice
+when browser storage is available. Other browser languages fall back to English.
+Raw server diagnostic messages remain English. Changing language does not
+restart verification or invalidate a ready download link.

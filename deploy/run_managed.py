@@ -8,6 +8,7 @@ No game input, signing secret or save is sent to GitHub.
 import argparse
 import copy
 import hashlib
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -171,6 +172,12 @@ def stage(root, base, worker_release, patch_release, previous_revision):
     metadata = download(worker_release, worker_dir, WORKER_FILES, "patcher-linux-x64")
     if metadata.get("workerApiVersion") != 1:
         raise ValueError("worker needs a newer deployment entry point")
+    if base.get("security", {}).get("allowLanProxy"):
+        binary = worker_dir / "ggfm-patcher-web"
+        binary.chmod(0o755)
+        if not supports_lan_proxy(binary):
+            log("Skipping release: worker lacks LAN proxy capability; active service remains online")
+            raise ValueError("release lacks LAN proxy support; keeping active worker without interruption")
     download(patch_release, patch_dir, PATCH_FILES, "patch-android-arm64")
     dependencies = verify_runtime(patch_dir)
     source = root / "sources" / patch_release["commit"]
@@ -232,8 +239,42 @@ def child_env(generation):
     return env
 
 
+def supports_lan_proxy(binary):
+    try:
+        env = dict(os.environ)
+        env.pop("GGFM_PATCHER_CONFIG", None)
+        result = subprocess.run([str(binary), "--network-capabilities"], env=env,
+                                capture_output=True, text=True, timeout=10, check=True)
+        return json.loads(result.stdout).get("lanProxy") is True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
+
+
 def start(generation):
     return subprocess.Popen([generation["binary"]], env=child_env(generation))
+
+
+def inherit_network(base, active, root):
+    """Overlay operator networking without mutating an immutable generation."""
+    config = json.loads(Path(active["config"]).read_text())
+    config["listen"] = base["listen"]
+    security = config.setdefault("security", {})
+    for key in ("trustedProxies", "clientIpHeader", "requireTrustedProxy", "allowLanProxy"):
+        if key in base.get("security", {}):
+            security[key] = copy.deepcopy(base["security"][key])
+        else:
+            security.pop(key, None)
+    path = root / "runtime-active.json"
+    atomic_json(path, config)
+    return dict(active, config=str(path))
+
+
+def health_url(listen):
+    host, port = listen.rsplit(":", 1)
+    ip = ipaddress.ip_address(host.strip("[]"))
+    if ip.is_unspecified:
+        ip = ipaddress.ip_address("127.0.0.1" if ip.version == 4 else "::1")
+    return f"http://{'[' + str(ip) + ']' if ip.version == 6 else ip}:{port}/healthz"
 
 
 def ready(generation, child):
@@ -245,8 +286,8 @@ def ready(generation, child):
     deadline = time.monotonic() + 1800
     while not STOP and time.monotonic() < deadline and child.poll() is None:
         try:
-            request = urllib.request.Request("http://" + config["listen"] + "/healthz", headers=headers)
-            with urllib.request.urlopen(request, timeout=3) as response:
+            request = urllib.request.Request(health_url(config["listen"]), headers=headers)
+            with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(request, timeout=3) as response:
                 status = json.loads(response.read(8192))
                 if status.get("ok"):
                     return status
@@ -322,6 +363,8 @@ def main():
     if state["identity"] != identity:
         raise SystemExit("deployment identity changed; keep the original config, application ID and signing key")
     active = state.get("active") or {"config": str(args.config.resolve()), "binary": str(args.binary.resolve()), "revision": 0}
+    active = inherit_network(base, active, root)
+    log(f"Operator network config applied: listen={base['listen']}; LAN proxy={bool(base.get('security', {}).get('allowLanProxy'))}")
     def stopping(_signal, _frame):
         global STOP
         STOP = True

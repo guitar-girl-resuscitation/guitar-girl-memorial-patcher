@@ -180,6 +180,10 @@ impl IntoResponse for WebError {
 
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if std::env::args().nth(1).as_deref() == Some("--network-capabilities") {
+        println!("{{\"lanProxy\":true,\"apiVersion\":1}}");
+        return Ok(());
+    }
     tracing_subscriber::fmt()
         .with_ansi(false)
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
@@ -234,6 +238,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             security::protect,
         ));
     let listener = tokio::net::TcpListener::bind(address).await?;
+    tracing::info!(listen = %listener.local_addr()?, "HTTP listener ready");
     axum::serve(
         listener,
         app.into_make_service_with_connect_info::<SocketAddr>(),

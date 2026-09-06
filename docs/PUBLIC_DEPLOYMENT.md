@@ -14,6 +14,32 @@ a guarantee against DDoS. No Cloudflare account is configured by installing it.
 
 ## Host and tunnel setup
 
+### Alternative: Cloudflare -> Nginx on another LAN host -> Patcher
+
+Explicitly enable `security.allowLanProxy: true`, set `listen` to
+`0.0.0.0:19078` (or the Patcher's private address), and keep `publicOrigin`
+as a plain HTTPS origin, `requireTrustedProxy: true` and
+`clientIpHeader: "cf-connecting-ip"`. `trustedProxies` must contain the
+Nginx socket peer's exact private IP (`/32` for IPv4 or `/128` for IPv6),
+plus `127.0.0.1/32` and `::1/128` for supervisor health checks. Subnet-wide
+trust and public proxy IPs are rejected in this mode. The default remains
+loopback-only; the following Tunnel instructions describe that default.
+
+Restrict the Patcher port at the firewall to that Nginx host. On the Nginx
+public ingress, only accept Cloudflare traffic (or use an authenticated
+Tunnel). Pass `Host` and the original `CF-Connecting-IP` header through;
+never substitute Nginx's own address for the visitor IP. Without this ingress
+restriction a visitor could forge Cloudflare headers. Patcher peer checks
+cannot authenticate Cloudflare on behalf of an exposed Nginx.
+
+The managed supervisor now inherits `listen`, `trustedProxies`,
+`clientIpHeader`, `requireTrustedProxy`, and `allowLanProxy` from the primary
+config on restart. Do not edit generation snapshots. Origin, signing identity,
+runtime artifact paths and Android version counters remain unchanged.
+Wildcard health checks use loopback and ignore HTTP proxy environment variables.
+LAN deployments reject old update workers lacking LAN capability before
+stopping the active worker.
+
 1. Complete [DEPLOYMENT.md](DEPLOYMENT.md): pinned Patch checkout, matched Server
    artifacts, signing setup and private work/cache directories are still required.
 2. Run one Patcher process as an unprivileged dedicated user. Review

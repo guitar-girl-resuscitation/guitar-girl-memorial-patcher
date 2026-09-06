@@ -26,6 +26,7 @@ pub struct SecurityConfig {
     pub trusted_proxies: Vec<IpNet>,
     pub client_ip_header: String,
     pub require_trusted_proxy: bool,
+    pub allow_lan_proxy: bool,
     pub requests_per_minute: u32,
     pub api_per_minute: u32,
     pub uploads_per_ten_minutes: u32,
@@ -44,6 +45,7 @@ impl Default for SecurityConfig {
             trusted_proxies: vec![],
             client_ip_header: "x-real-ip".into(),
             require_trusted_proxy: false,
+            allow_lan_proxy: false,
             requests_per_minute: 60,
             api_per_minute: 20,
             uploads_per_ten_minutes: 2,
@@ -213,6 +215,30 @@ impl Security {
         }))
     }
     pub fn validate_listen(&self, address: SocketAddr) -> Result<(), String> {
+        if self.config.allow_lan_proxy {
+            let private = |ip: IpAddr| match canonical(ip) {
+                IpAddr::V4(v) => v.is_private(),
+                IpAddr::V6(v) => v.is_unique_local(),
+            };
+            let exact_private_peer = |n: &IpNet| {
+                n.prefix_len() == (if n.addr().is_ipv4() { 32 } else { 128 }) && private(n.addr())
+            };
+            if self.authority.is_none()
+                || !self.config.require_trusted_proxy
+                || self.config.client_ip_header != "cf-connecting-ip"
+                || !self.config.trusted_proxies.iter().any(exact_private_peer)
+                || self.config.trusted_proxies.iter().any(|n| {
+                    !matches!(n.to_string().as_str(), "127.0.0.1/32" | "::1/128")
+                        && !exact_private_peer(n)
+                })
+                || !(address.ip().is_loopback()
+                    || address.ip().is_unspecified()
+                    || private(address.ip()))
+            {
+                return Err("LAN proxy requires HTTPS publicOrigin, CF-Connecting-IP, requireTrustedProxy and exact private proxy IPs (/32 or /128)".into());
+            }
+            return Ok(());
+        }
         if !address.ip().is_loopback() {
             return Err("listen must be loopback; public ingress is Cloudflare Tunnel only".into());
         }
@@ -599,6 +625,53 @@ mod tests {
         let s = Security::new(config()).unwrap();
         assert!(s.validate_listen("0.0.0.0:8080".parse().unwrap()).is_err());
         assert!(s.validate_listen("127.0.0.1:8080".parse().unwrap()).is_ok());
+    }
+    #[test]
+    fn lan_proxy_is_explicit_and_requires_exact_private_peers() {
+        let mut c = config();
+        c.public_origin = Some("https://example.org".into());
+        c.allow_lan_proxy = true;
+        c.require_trusted_proxy = true;
+        c.client_ip_header = "cf-connecting-ip".into();
+        c.trusted_proxies = vec![
+            "127.0.0.1/32".parse().unwrap(),
+            "10.0.0.1/32".parse().unwrap(),
+        ];
+        let s = Security::new(c.clone()).unwrap();
+        assert!(s.validate_listen("0.0.0.0:19078".parse().unwrap()).is_ok());
+        assert!(
+            s.validate_listen("10.0.100.8:19078".parse().unwrap())
+                .is_ok()
+        );
+        assert!(s.validate_listen("8.8.8.8:19078".parse().unwrap()).is_err());
+        let mut h = HeaderMap::new();
+        h.insert("cf-connecting-ip", "192.0.2.10".parse().unwrap());
+        assert_eq!(s.client_ip(ip("10.0.0.1"), &h).unwrap(), ip("192.0.2.10"));
+        assert!(s.client_ip(ip("10.0.0.2"), &h).is_err());
+        assert!(s.client_ip(ip("10.0.0.1"), &HeaderMap::new()).is_err());
+        for network in ["10.0.0.0/8", "8.8.8.8/32", "::/0"] {
+            let mut bad = c.clone();
+            bad.trusted_proxies = vec![network.parse().unwrap()];
+            assert!(
+                Security::new(bad)
+                    .and_then(|s| s.validate_listen("0.0.0.0:19078".parse().unwrap()))
+                    .is_err()
+            );
+        }
+        for change in 0..4 {
+            let mut bad = c.clone();
+            match change {
+                0 => bad.allow_lan_proxy = false,
+                1 => bad.require_trusted_proxy = false,
+                2 => bad.client_ip_header = "x-forwarded-for".into(),
+                _ => bad.public_origin = None,
+            }
+            assert!(
+                Security::new(bad)
+                    .and_then(|s| s.validate_listen("0.0.0.0:19078".parse().unwrap()))
+                    .is_err()
+            );
+        }
     }
     #[test]
     fn public_example_requires_cloudflare_tunnel_and_loopback() {
