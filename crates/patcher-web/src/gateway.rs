@@ -49,8 +49,20 @@ fn clean_headers(headers: &mut HeaderMap) {
         headers.remove(name);
     }
 }
+fn allowed_path(path: &str) -> bool {
+    matches!(path, "/" | "/healthz" | "/api/v1/update" | "/api/v1/patch"
+        | "/api/v1/prebuilt/challenge" | "/api/v1/prebuilt/prove")
+        || path.strip_prefix("/api/v1/download/").is_some_and(|token|
+            !token.is_empty() && token.len() <= 128
+                && token.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'.' || c == b'_' || c == b'-'))
+}
 async fn forward(State(state): State<Gateway>, mut request: Request) -> Result<Response, WebError> {
     let path = request.uri().path().to_owned();
+    // Prevent URL normalization from turning an unclassified request into an
+    // upload after the ingress has applied a different limit/routing policy.
+    if !allowed_path(&path) {
+        return Err(WebError(StatusCode::NOT_FOUND, "unknown endpoint".into()));
+    }
     let mut revision = path.strip_prefix("/api/v1/download/").and_then(token_revision);
     if path == "/api/v1/prebuilt/prove" {
         let (mut parts, body) = request.into_parts();
@@ -182,6 +194,10 @@ mod tests {
         assert_eq!(untag_token("g42.ABCD"), "ABCD");
         assert_eq!(token_revision("http://evil.invalid"), None);
         assert_eq!(untag_token("LEGACY"), "LEGACY");
+        assert!(allowed_path("/api/v1/download/g42.ABCD"));
+        assert!(!allowed_path("/api/v1/download/../patch"));
+        assert!(!allowed_path("/api/v1/x/../patch"));
+        assert!(!allowed_path("/api/v1/%70atch"));
     }
     #[test]
     fn hop_headers_and_injected_identity_are_removed() {

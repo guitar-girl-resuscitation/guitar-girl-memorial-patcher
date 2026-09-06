@@ -30,7 +30,7 @@ revision=c['testRevision']
 class H(BaseHTTPRequestHandler):
  def log_message(self,*args): pass
  def do_GET(self):
-  if self.path=='/slow':
+  if self.path=='/api/v1/download/g8.slow':
    self.send_response(200); self.send_header('Content-Length','60000'); self.end_headers()
    for i in range(60): self.wfile.write(b'x'*1000);self.wfile.flush();time.sleep(.06)
    return
@@ -106,7 +106,7 @@ class BlueGreenTests(unittest.TestCase):
                 time.sleep(.04)
         thread=threading.Thread(target=poll);thread.start()
         with concurrent.futures.ThreadPoolExecutor(1) as pool:
-            stream=pool.submit(lambda: urllib.request.urlopen(self.url+'/slow',timeout=8).read())
+            stream=pool.submit(lambda: urllib.request.urlopen(self.url+'/api/v1/download/g8.slow',timeout=8).read())
             time.sleep(.15)
             active,child=self.blue.activate(self.generation(9,startupDelay=.5),self.old,self.child,self.state,self.statefile,'new')
             self.assertFalse(stream.done(), 'slow download must span the cutover')
