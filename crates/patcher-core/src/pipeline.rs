@@ -14,6 +14,10 @@ use zip::{CompressionMethod, ZipArchive, ZipWriter, write::SimpleFileOptions};
 
 use crate::{CompatibilityManifest, Limits, PatchPlan, VerifiedPackage, sha256_file, verify_xapk};
 
+#[path = "pipeline_supplement.rs"]
+mod supplement;
+pub use supplement::NativeSupplement;
+
 #[derive(Clone, Debug)]
 pub struct Toolchain {
     pub java: PathBuf,
@@ -26,6 +30,7 @@ pub struct Toolchain {
 
 #[derive(Clone, Debug)]
 pub struct PatchArtifacts {
+    pub additional_native: Option<NativeSupplement>,
     pub patch_root: PathBuf,
     pub bootstrap_dex: PathBuf,
     pub bootstrap_dex_sha256: String,
@@ -127,6 +132,13 @@ impl Pipeline {
         extract_xapk(source, &extracted)?;
         enforce_work_quota(workspace.path(), self.limits.max_work_bytes)?;
         verify_embedded_payloads(&extracted, manifest, workspace.path())?;
+        let mut output_manifest = manifest.clone();
+        if let Some(extra) = &self.artifacts.additional_native {
+            let profile = extra.stage(manifest, &self.artifacts.policy_sha256, &extracted, workspace.path())?;
+            let split = profile.source.splits.iter().find(|s| s.name == profile.source.abi.split_name())
+                .ok_or(PipelineError::MissingBase)?.clone();
+            output_manifest.source.splits.push(split);
+        }
 
         let base_name = manifest
             .source
@@ -145,7 +157,7 @@ impl Pipeline {
         fs::create_dir(&framework_dir)?;
 
         let mut rebuilt = BTreeMap::new();
-        for split in &manifest.source.splits {
+        for split in &output_manifest.source.splits {
             let decoded = workspace.path().join("decoded").join(&split.name);
             run_checked(
                 &self.tools.java,
@@ -390,6 +402,9 @@ impl Pipeline {
             ],
         )?;
         rebuilt.insert(manifest.source.abi.split_name().into(), patched_arm);
+        if let Some(extra) = &self.artifacts.additional_native {
+            extra.inject(&mut rebuilt, &unsigned_dir)?;
+        }
         enforce_work_quota(workspace.path(), self.limits.max_work_bytes)?;
 
         for (name, unsigned) in &rebuilt {
@@ -465,12 +480,16 @@ impl Pipeline {
             &bootstrap_dex_name,
             &transformed_table_bundle_sha256,
         )?;
+        if self.artifacts.additional_native.is_some() {
+            validate_injected_payloads(&signed_dir, crate::manifest::AndroidAbi::ArmV7,
+                base_name, &bootstrap_dex_name, &transformed_table_bundle_sha256)?;
+        }
 
         let staged_output = workspace.path().join("validated-output.xapk");
         build_xapk(
             &extracted,
             &signed_dir,
-            manifest,
+            &output_manifest,
             plan,
             version_code,
             &version_name,
@@ -478,7 +497,7 @@ impl Pipeline {
         )?;
         validate_output_xapk(
             &staged_output,
-            manifest,
+            &output_manifest,
             plan,
             version_code,
             &version_name,
@@ -1353,9 +1372,17 @@ fn append_zip_entries(
     let mut input = ZipArchive::new(File::open(source)?)?;
     let mut writer = ZipWriter::new(File::create(output)?);
     for index in 0..input.len() {
-        let entry = input.by_index(index)?;
+        let mut entry = input.by_index(index)?;
         if !names.contains(entry.name()) {
-            writer.raw_copy_file(entry)?;
+            if entry.name().starts_with("lib/") && entry.name().ends_with(".so") {
+                // A supplemental original split may have used extraction while
+                // the shared base requires mmap. Normalize all native entries,
+                // not only our injected libraries; zipalign runs afterwards.
+                writer.start_file(entry.name(), SimpleFileOptions::default().compression_method(CompressionMethod::Stored))?;
+                io::copy(&mut entry, &mut writer)?;
+            } else {
+                writer.raw_copy_file(entry)?;
+            }
         }
     }
     for (path, name) in additions {
@@ -1410,6 +1437,16 @@ fn build_xapk(
             }
         }
     }
+    // Derive both lists from the actual output split set, including an optional
+    // verified second ABI. Installers must never mistake it for the base APK.
+    document["split_apks"] = Value::Array(manifest.source.splits.iter().map(|split| {
+        let base = !split.name.starts_with("config.") && split.name != "base_assets.apk";
+        serde_json::json!({"id": if base { "base" } else { split.name.trim_end_matches(".apk") },
+            "file": if base { format!("{}.apk", plan.application_id) } else { split.name.clone() }})
+    }).collect());
+    document["split_configs"] = Value::Array(manifest.source.splits.iter()
+        .filter(|s| s.name.starts_with("config.") || s.name == "base_assets.apk")
+        .map(|s| Value::String(s.name.trim_end_matches(".apk").to_owned())).collect());
     document["total_size"] = manifest
         .source
         .splits
@@ -1428,7 +1465,7 @@ fn build_xapk(
         io::copy(&mut File::open(extracted.join("icon.png"))?, &mut writer)?;
     }
     for split in &manifest.source.splits {
-        let output_name = if split.name != manifest.source.abi.split_name() && split.name != "base_assets.apk"
+        let output_name = if !split.name.starts_with("config.") && split.name != "base_assets.apk"
         {
             format!("{}.apk", plan.application_id)
         } else {
@@ -1539,6 +1576,31 @@ fn validate_output_xapk(
 #[cfg(test)]
 mod output_validation_tests {
     use super::*;
+
+    #[test]
+    fn universal_xapk_lists_both_architectures_without_renaming_either_as_base() {
+        let dir = tempfile::tempdir().unwrap();
+        let extracted = dir.path().join("extracted");
+        let signed = dir.path().join("signed");
+        fs::create_dir(&extracted).unwrap();
+        fs::create_dir(&signed).unwrap();
+        let mut manifest = CompatibilityManifest::parse(include_bytes!("../../../patch/compatibility/8.0.0.json")).unwrap();
+        manifest.source.splits.push(crate::SplitDigest { name: "config.armeabi_v7a.apk".into(), sha256: "AB".repeat(32) });
+        let base_name = &manifest.source.splits[0].name;
+        for split in &manifest.source.splits { fs::write(signed.join(&split.name), b"test-only").unwrap(); }
+        fs::write(extracted.join("manifest.json"), br#"{"package_name":"com.neowiz.game.guitargirl","split_apks":[{"id":"base","file":"old.apk"}],"split_configs":["config.arm64_v8a","base_assets"]}"#).unwrap();
+        let plan = PatchPlan { application_id: "org.guitargirlresuscitation.memorial.test".into(),
+            application_label: "Test".into(), signer_fingerprint: "AB".repeat(32), cache_key: "test".into(),
+            update_origin: None, deployment_revision: None, stages: vec![] };
+        let output = dir.path().join("test.xapk");
+        build_xapk(&extracted, &signed, &manifest, &plan, 800001, "test", &output).unwrap();
+        validate_output_xapk(&output, &manifest, &plan, 800001, "test", base_name).unwrap();
+        let mut archive = ZipArchive::new(File::open(output).unwrap()).unwrap();
+        let metadata: Value = serde_json::from_reader(archive.by_name("manifest.json").unwrap()).unwrap();
+        assert_eq!(metadata["split_configs"].as_array().unwrap().len(), 3);
+        assert_eq!(metadata["split_apks"].as_array().unwrap().len(), 4);
+        assert_eq!(metadata["total_size"], 36);
+    }
 
     #[test]
     fn native_abi_guard_rejects_mixed_server_and_patch_architectures() {
@@ -1792,6 +1854,8 @@ mod output_validation_tests {
             )
             .unwrap();
         writer.write_all(b"manifest").unwrap();
+        writer.start_file("lib/armeabi-v7a/libOriginal.so", SimpleFileOptions::default().compression_method(CompressionMethod::Deflated)).unwrap();
+        writer.write_all(b"original-native-library").unwrap();
         writer.finish().unwrap();
 
         append_zip_entries(
@@ -1805,6 +1869,7 @@ mod output_validation_tests {
         .unwrap();
 
         let mut archive = ZipArchive::new(File::open(output).unwrap()).unwrap();
+        assert_eq!(archive.by_name("lib/armeabi-v7a/libOriginal.so").unwrap().compression(), CompressionMethod::Stored);
         assert_eq!(
             archive
                 .by_name("lib/arm64-v8a/libggfm_server.so")

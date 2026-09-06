@@ -63,6 +63,8 @@ struct ToolConfig {
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ArtifactConfig {
+    #[serde(default)]
+    additional_native: Option<ggfm_patcher_core::NativeSupplement>,
     patch_root: PathBuf,
     bootstrap_dex: PathBuf,
     bootstrap_dex_sha256: String,
@@ -145,6 +147,7 @@ struct Health {
     source_sha256: String,
     android_version: ggfm_patcher_core::AndroidVersion,
     components: serde_json::Value,
+    android_abis: serde_json::Value,
 }
 
 #[derive(Serialize)]
@@ -186,7 +189,7 @@ impl IntoResponse for WebError {
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args().nth(1).as_deref() == Some("--network-capabilities") {
-        println!("{{\"lanProxy\":true,\"apiVersion\":1}}");
+        println!("{{\"lanProxy\":true,\"universalArm\":true,\"apiVersion\":1}}");
         return Ok(());
     }
     tracing_subscriber::fmt()
@@ -308,6 +311,9 @@ fn deployment_fingerprint(config: &Config) -> Result<String, Box<dyn std::error:
         "patcher": sha256_file(&std::env::current_exe()?)?,
         "apktool": sha256_file(&config.tools.apktool_jar)?,
         "manifest": sha256_file(&config.compatibility_manifest)?,
+        "additionalNativeSource": config.artifacts.additional_native.as_ref().map(|extra| {
+            Ok::<_, std::io::Error>((sha256_file(&extra.source_split)?, sha256_file(&extra.compatibility_manifest)?))
+        }).transpose()?,
     }))?;
     Ok(hex::encode_upper(Sha256::digest(provenance)))
 }
@@ -389,6 +395,7 @@ async fn health(State(state): State<AppState>) -> Json<Health> {
         )
         .expect("version validated before serving"),
         components: component_versions(&state.config.versions),
+        android_abis: supported_output_abis(&state),
     })
 }
 
@@ -424,6 +431,12 @@ fn component_dates_never_follow_an_unrelated_upstream_release() {
     assert_eq!(changed["patcher"]["commit"], env!("GGFM_SOURCE_COMMIT"));
 }
 
+fn supported_output_abis(state: &AppState) -> serde_json::Value {
+    if state.config.artifacts.additional_native.is_some() {
+        serde_json::json!(["arm64-v8a", "armeabi-v7a"])
+    } else { serde_json::json!([state.compatibility.source.abi]) }
+}
+
 async fn update_info(State(state): State<AppState>) -> Json<serde_json::Value> {
     let version = ggfm_patcher_core::AndroidVersion::deployment(
         state.config.versions.revision,
@@ -436,6 +449,7 @@ async fn update_info(State(state): State<AppState>) -> Json<serde_json::Value> {
             .unwrap_or(&state.compatibility.output.application_id),
         "signerSha256": state.config.signing.fingerprint,
         "androidAbi": state.compatibility.source.abi,
+        "androidAbis": supported_output_abis(&state),
         "versionCode": version.version_code,
         "versionName": version.version_name,
     }))
@@ -723,6 +737,7 @@ fn pipeline(config: &Config) -> Pipeline {
             apksigner: config.tools.apksigner.clone(),
         },
         artifacts: PatchArtifacts {
+            additional_native: config.artifacts.additional_native.clone(),
             patch_root: config.artifacts.patch_root.clone(),
             bootstrap_dex: config.artifacts.bootstrap_dex.clone(),
             bootstrap_dex_sha256: config.artifacts.bootstrap_dex_sha256.clone(),
@@ -882,6 +897,21 @@ mod tests {
         );
         assert_eq!(info["signerSha256"], state.config.signing.fingerprint);
         assert_eq!(info["androidAbi"], "arm64-v8a");
+        assert_eq!(info["androidAbis"], status.android_abis);
+        let extra = ggfm_patcher_core::NativeSupplement {
+            source_split: "synthetic-original".into(), compatibility_manifest: "synthetic-profile".into(),
+            bootstrap_so: "synthetic-bootstrap".into(), bootstrap_so_sha256: "0".repeat(64),
+            dobby_so: "synthetic-dobby".into(), dobby_sha256: "0".repeat(64),
+            server_so: "synthetic-server".into(), server_sha256: "0".repeat(64),
+        };
+        Arc::make_mut(&mut state.config).artifacts.additional_native = Some(extra);
+        let Json(universal) = update_info(State(state.clone())).await;
+        let Json(universal_health) = health(State(state.clone())).await;
+        assert_eq!(universal["androidAbis"], serde_json::json!(["arm64-v8a", "armeabi-v7a"]));
+        assert_eq!(universal["androidAbis"], universal_health.android_abis);
+        assert_eq!(universal["versionCode"], info["versionCode"]);
+        assert_eq!(universal["signerSha256"], info["signerSha256"]);
+        Arc::make_mut(&mut state.config).artifacts.additional_native = None;
         assert_eq!(status.android_version.revision, revision);
         Arc::make_mut(&mut state.compatibility).source.abi =
             serde_json::from_value(serde_json::json!("armeabi-v7a")).unwrap();

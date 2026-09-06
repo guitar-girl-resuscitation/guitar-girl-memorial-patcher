@@ -180,12 +180,40 @@ def run(command, **kwargs):
     return subprocess.run(list(map(str, command)), check=True, timeout=1800, **kwargs)
 
 
-def stage(root, base, worker_release, patch_release, previous_revision):
+def load_native_overlay(config_path, base):
+    """Read an additive private input descriptor; never rewrite operator config."""
+    private = config_path.resolve().parent
+    descriptor = private / "native-armv7.json"
+    if not descriptor.exists():
+        return base
+    value = json.loads(descriptor.read_text(encoding="utf-8"))
+    if set(value) != {"schema", "splitFile", "sha256"} or value["schema"] != 1:
+        raise ValueError("invalid ARMv7 overlay descriptor")
+    source = (private / value["splitFile"]).resolve(strict=True)
+    if not source.is_file() or not source.is_relative_to(private) or source.stat().st_size > MAX_ARCHIVE:
+        raise ValueError("ARMv7 overlay source is outside private directory or too large")
+    expected = "49848F553811A72379385A90CCC7CB3BBB0622FD39D13AAA757C1319071C69E6"
+    if value["sha256"].upper() != expected or digest(source) != expected:
+        raise ValueError("ARMv7 overlay original split fingerprint mismatch")
+    if runtime_profile(base)[0] != "arm64-v8a":
+        raise ValueError("universal overlay requires the verified ARM64 primary source")
+    result = copy.deepcopy(base)
+    result["universalArmv7Source"] = str(source)
+    log("Verified private ARMv7 input found; next compatible generation will build both ARM ABIs")
+    return result
+
+
+def stage(root, base, worker_release, patch_release, previous_revision, supplement_release=None):
     worker_dir = root / "artifacts" / worker_release["asset"]["digest"].split(":")[1]
     patch_dir = root / "artifacts" / patch_release["asset"]["digest"].split(":")[1]
     metadata = download(worker_release, worker_dir, WORKER_FILES, "patcher-linux-x64")
     if metadata.get("workerApiVersion") != 1:
         raise ValueError("worker needs a newer deployment entry point")
+    if base.get("universalArmv7Source"):
+        binary = worker_dir / "ggfm-patcher-web"
+        binary.chmod(0o755)
+        if not supports_universal_arm(binary):
+            raise ValueError("worker lacks universal ARM support; keeping existing generation")
     if base.get("security", {}).get("allowLanProxy"):
         binary = worker_dir / "ggfm-patcher-web"
         binary.chmod(0o755)
@@ -239,6 +267,24 @@ def stage(root, base, worker_release, patch_release, previous_revision):
     config["compatibilityManifest"] = str(source / "compatibility" / profile_name)
     if runtime_profile(config)[0] != abi:
         raise ValueError("updated source profile changed Android ABI")
+    if base.get("universalArmv7Source"):
+        selected = supplement_release or release(PATCH, "ggfm-patch-android-armv7.zip")
+        if selected["commit"] != patch_release["commit"]:
+            raise ValueError("ARM runtime releases changed during update; retry with one exact commit")
+        v7_dir = root / "artifacts" / selected["asset"]["digest"].split(":")[1]
+        download(selected, v7_dir, PATCH_FILES, "patch-android-armv7")
+        v7_dependencies = verify_runtime(v7_dir, "armeabi-v7a")
+        if (v7_dependencies["server"]["sourceCommit"] != dependencies["server"]["sourceCommit"]
+                or v7_dependencies["policySha256"] != dependencies["policySha256"]
+                or digest(v7_dir / "classes.dex") != digest(patch_dir / "classes.dex")):
+            raise ValueError("universal runtime Server/policy/DEX mismatch")
+        artifacts["additionalNative"] = {
+            "sourceSplit": base["universalArmv7Source"],
+            "compatibilityManifest": str(source / "compatibility/8.0.0-armv7.json"),
+            "bootstrapSo": str(v7_dir / "libggfm_bootstrap.so"),
+            "bootstrapSoSha256": digest(v7_dir / "libggfm_bootstrap.so"),
+            "dobbySo": str(v7_dir / "libdobby.so"), "dobbySha256": digest(v7_dir / "libdobby.so"),
+            "serverSo": str(v7_dir / "libggfm_server.so"), "serverSha256": digest(v7_dir / "libggfm_server.so")}
     old_lock = Path(base["artifacts"]["patchRoot"]) / "tools/requirements.lock.txt"
     new_lock = source / "tools/requirements.lock.txt"
     if not old_lock.is_file() or digest(old_lock) != digest(new_lock):
@@ -276,6 +322,17 @@ def supports_lan_proxy(binary):
 
 def start(generation):
     return subprocess.Popen([generation["binary"]], env=child_env(generation))
+
+
+def supports_universal_arm(binary):
+    env = dict(os.environ)
+    env.pop("GGFM_PATCHER_CONFIG", None)
+    try:
+        result = subprocess.run([str(binary), "--network-capabilities"], check=True,
+                                capture_output=True, text=True, timeout=10, env=env)
+        return json.loads(result.stdout).get("universalArm") is True
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return False
 
 
 def inherit_network(base, active, root):
@@ -379,7 +436,7 @@ def main():
     root.mkdir(parents=True, exist_ok=True)
     lock = (root / "supervisor.lock").open("a+")
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-    base = json.loads(args.config.read_text())
+    base = load_native_overlay(args.config, json.loads(args.config.read_text()))
     identity = {"applicationId": base.get("applicationId"), "signer": base["signing"]["fingerprint"],
                 "origin": base.get("security", {}).get("publicOrigin")}
     state_path = root / "state.json"
@@ -417,9 +474,15 @@ def main():
                     worker_release = release(WORKER, "ggfm-patcher-linux-x64.zip")
                     patch_release = release(PATCH, "ggfm-" + runtime_profile(base)[1] + ".zip")
                     pair = worker_release["asset"]["digest"] + "/" + patch_release["asset"]["digest"]
+                    supplement_release = None
+                    if base.get("universalArmv7Source"):
+                        supplement_release = release(PATCH, "ggfm-patch-android-armv7.zip")
+                        if supplement_release["commit"] != patch_release["commit"]:
+                            raise ValueError("ARM release pair changed; retaining active generation")
+                        pair += "/universal-arm-v1/" + supplement_release["asset"]["digest"]
                     if pair != state.get("pair"):
                         log("Verified-release update found; staging immutable runtime")
-                        candidate = stage(root, base, worker_release, patch_release, state["counter"])
+                        candidate = stage(root, base, worker_release, patch_release, state["counter"], supplement_release)
                         state["counter"] = candidate["revision"]
                         atomic_json(state_path, state)  # never reuse an allocated Android version
                         log("Draining worker before rebuilding operator XAPK; signing identity is unchanged")

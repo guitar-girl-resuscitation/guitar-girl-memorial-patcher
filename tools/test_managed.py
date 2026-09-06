@@ -42,6 +42,35 @@ HTTPServer((host, int(port)), Handler).serve_forever()
 
 
 class ArchiveTests(unittest.TestCase):
+    def test_additive_native_overlay_preserves_operator_config_and_rejects_unknown_input(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            config = root / "patcher.json"
+            base = {"applicationId": "unchanged", "signing": {"fingerprint": "unchanged"}}
+            config.write_text(json.dumps(base))
+            self.assertEqual(m.load_native_overlay(config, base), base)
+            split = root / "armv7.apk"
+            split.write_bytes(b"synthetic test only")
+            expected = "49848F553811A72379385A90CCC7CB3BBB0622FD39D13AAA757C1319071C69E6"
+            descriptor = root / "native-armv7.json"
+            descriptor.write_text(json.dumps({"schema": 1, "splitFile": split.name, "sha256": expected}))
+            with self.assertRaises(ValueError):
+                m.load_native_overlay(config, base)
+            with patch.object(m, "digest", return_value=expected), patch.object(m, "runtime_profile", return_value=("arm64-v8a", "", "")):
+                result = m.load_native_overlay(config, base)
+                self.assertEqual(result["universalArmv7Source"], str(split.resolve()))
+            self.assertNotIn("universalArmv7Source", base)
+            self.assertEqual(json.loads(config.read_text()), base)
+            descriptor.write_text(json.dumps({"schema": 1, "splitFile": "../not-private.apk", "sha256": expected}))
+            with self.assertRaises((ValueError, FileNotFoundError)):
+                m.load_native_overlay(config, base)
+
+    def test_universal_capability_does_not_assume_legacy_worker_support(self):
+        import subprocess
+        for payload, expected in [('{"lanProxy":true}', False), ('{"universalArm":true}', True), ('invalid', False)]:
+            with patch.object(m.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, payload, "")):
+                self.assertEqual(m.supports_universal_arm(Path("fixture")), expected)
+
     def test_android_profile_selection_is_explicit_and_fail_closed(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "compatibility.json"

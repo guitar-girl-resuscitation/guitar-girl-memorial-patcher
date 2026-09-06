@@ -31,9 +31,31 @@ apply. This does not change the package name, key, version counter or saves.
 更新元数据包含 `androidAbi`，客户端只提示设备可运行的架构，且仍校验签名、
 包名和递增版本。此改动不更换包名、密钥或存档。
 
-Each current web deployment serves one profile. It does not yet merge two
-originals into a universal XAPK or select multiple source profiles on one page.
-Do not advertise a V8-only deployment as supporting 32-bit-only phones.
+## Optional universal ARM output / 可选双架构输出
 
-目前单个网页部署服务一个配置，不会自动合并两个原包为通用 XAPK，也没有
-同页多源包选择。不要将只部署了 V8 原包的站点标为支持纯 32 位手机。
+The approved ARM64 source plus the verified original ARMv7 native split can
+produce one XAPK containing a shared base/assets and both ABI splits. The CLI
+accepts `--additional-native` (a JSON file matching `NativeSupplement`); web
+configuration uses `artifacts.additionalNative`. All original and runtime hashes,
+ELF ABIs and policy fingerprints are checked. Native entries are stored without
+compression and aligned before signing with the existing deployment certificate.
+
+Managed deployments can add `native-armv7.json` next to their operator config:
+`{"schema":1,"splitFile":"input/config.armeabi_v7a.original.apk","sha256":"49848F553811A72379385A90CCC7CB3BBB0622FD39D13AAA757C1319071C69E6"}`.
+The file is relative to that private directory and cannot escape it. Supply the
+original split privately; this repository/releases do not contain it. Restart
+the supervisor with auto-updates enabled. It fetches a universal-capable worker
+and both runtime archives, requires matching Patch/Server commits, DEX and policy,
+then prebuilds a new immutable generation. Failure retains the previous generation.
+It does not rewrite the operator config, key, package name or version history.
+
+现有 V8 原包无需替换。差量覆盖包在 `private/` 添加上述描述及已校验的 V7 原始
+split，并更新 `worker/deploy/run_managed.py`。解压到原部署根目录后重启进程即可，
+不需要重新 setup 或修改域名、代理、签名配置。自动更新必须开启；首次合包完成前
+旧成品仍可能是 V8。`/healthz` 和 `/api/v1/update` 的 `androidAbis` 同时包含
+`arm64-v8a`、`armeabi-v7a` 时才说明当前激活代支持双架构。后续自动更新保留双架构。
+没有补充 V7 输入时仍只生成原配置架构，不应宣称支持纯 32 位手机。
+
+Updated clients consume `androidAbis`; legacy `androidAbi` remains the primary ABI
+for older clients. Installing the appropriate ABI split is the XAPK installer's
+job. A single XAPK does not mean both native architectures run in one process.

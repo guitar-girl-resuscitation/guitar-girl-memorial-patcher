@@ -105,6 +105,9 @@ struct PatchArguments {
     signer_fingerprint: String,
     #[arg(long)]
     application_id: Option<String>,
+    /// JSON configuration for an operator-owned supplemental ARMv7 split/runtime.
+    #[arg(long)]
+    additional_native: Option<PathBuf>,
     /// Zero uses the compiled release; explicit values are for unnumbered local builds.
     #[arg(long, default_value_t = 0)]
     revision: u32,
@@ -185,6 +188,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 server_sha256,
                 signer_fingerprint,
                 application_id,
+                additional_native,
                 revision,
             } = *arguments;
             let compatibility = load_manifest(&manifest)?;
@@ -212,6 +216,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     apksigner,
                 },
                 artifacts: PatchArtifacts {
+                    additional_native: additional_native.map(|p| -> Result<_, Box<dyn std::error::Error>> {
+                        Ok(serde_json::from_slice(&fs::read(p)?)?)
+                    }).transpose()?,
                     patch_root,
                     bootstrap_dex,
                     bootstrap_dex_sha256,
