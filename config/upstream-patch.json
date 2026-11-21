@@ -1,11 +1,11 @@
 {
   "schema": 1,
   "repository": "guitar-girl-resuscitation/guitar-girl-memorial-patch",
-  "commit": "fa24d955c22fa6563c98812251ebe3318092a648",
-  "releaseId": 391125792,
-  "assetId": 571398846,
-  "archiveSha256": "B04E94F4A314C82D780B39CF63AF8192D8811A6B3792C29FA65FDEDDAB223D08",
-  "serverCommit": "e9407f8ade1615682107a8fe1e4251b6302fa44a",
-  "patchUpdatedAt": "2026-09-17T23:48:03Z",
-  "serverUpdatedAt": "2026-09-16T20:27:11Z"
+  "commit": "b8705ef97a94827db21e3d7b9487661f1fc7fb18",
+  "releaseId": 453403143,
+  "assetId": 774238049,
+  "archiveSha256": "084D4F84D909FB6EF71BFB24B60E64171ABC7C18E68FD630A1842BB68349D9A4",
+  "serverCommit": "4c45c4c95108dc179168f74e19b49dd5f8468c3c",
+  "patchUpdatedAt": "2026-11-21T03:00:54Z",
+  "serverUpdatedAt": "2026-11-21T02:58:45Z"
 }
