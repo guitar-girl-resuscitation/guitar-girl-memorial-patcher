@@ -639,12 +639,17 @@ async fn download(
     }
     let file = tokio::fs::File::open(grant.path).await.map_err(internal)?;
     let length = file.metadata().await.map_err(internal)?.len();
+    let version = ggfm_patcher_core::AndroidVersion::deployment(
+        state.config.versions.revision,
+        state.config.versions.deployment_revision,
+    ).expect("version validated before serving");
+    let disposition = format!("attachment; filename=Guitar-Girl-Fan-Memorial-Build-{}.xapk", version.version_code);
     let mut response = (
         [
             (header::CONTENT_TYPE, "application/octet-stream"),
             (
                 header::CONTENT_DISPOSITION,
-                "attachment; filename=Guitar-Girl-Fan-Memorial-Build.xapk",
+                disposition.as_str(),
             ),
         ],
         Body::from_stream(ReaderStream::new(file)),
@@ -885,6 +890,23 @@ mod tests {
             prebuilt: None,
             deployment_fingerprint: "synthetic-test".into(),
         }
+    }
+
+    #[tokio::test]
+    async fn download_filename_uses_the_serving_workers_android_version() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut state = test_state(dir.path());
+        let revision = state.config.versions.revision + 1;
+        Arc::make_mut(&mut state.config).versions.deployment_revision = Some(revision);
+        let file = dir.path().join("cached.xapk");
+        fs::write(&file, b"test package").unwrap();
+        let Json(grant) = grant_download(&state, "cache-key".into(), file).await.unwrap();
+        let Json(status) = health(State(state.clone())).await;
+        let token = grant.download_token;
+        let response = download(State(state.clone()), AxumPath(token.clone())).await.unwrap();
+        assert_eq!(response.headers()[header::CONTENT_DISPOSITION].to_str().unwrap(),
+            format!("attachment; filename=Guitar-Girl-Fan-Memorial-Build-{}.xapk", status.android_version.version_code));
+        assert_eq!(download(State(state), AxumPath(token)).await.unwrap_err().0, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
