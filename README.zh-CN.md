@@ -151,7 +151,7 @@ export RUST_LOG=info
 
 - 按 IP 限制请求、API、上传和下载，并限制全局/单 IP 同时处理数。
 - 十分钟内 8 次符合条件的失败会触发十五分钟的进程内封禁。这不是 OS Fail2ban，也不会修改 Cloudflare 账号防火墙规则；重启会清除内存封禁状态。
-- API / 下载不可缓存，Cloudflare 对整个部署域名配置缓存绕过，不要使用 Cache Everything。
+- 在整站缓存绕过规则之后，仅为 `/?ggfm-part=…` 加密分片添加 **允许缓存** 规则。缓存键保留完整查询字符串，200 响应的边缘 TTL 可设为 7 天，其他状态不存储。浏览器通过一次性凭证取得密钥，逐片解密并保存带版本号的 XAPK。普通 API、凭证、密钥和完整明文包仍绕过缓存。无需 Cloudflare Workers。[规则表达式与验证](docs/PUBLIC_DEPLOYMENT.md#cloudflare-dashboard-rules)
 - 重型 worker 固定一个，忙时新上传返回 HTTP 503。
 - 上传最大 768 MiB，总超时十分钟，空闲超时三十秒。
 - 归档最多 64 项、展开上限 1.5 GiB；单请求工作目录配额 6 GiB；外部工具超时十五分钟。

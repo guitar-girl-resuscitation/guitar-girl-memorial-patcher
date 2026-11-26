@@ -82,10 +82,27 @@ describe Workers and header-transform caveats.
 Apply to the dedicated Patcher hostname, not unrelated sites in the zone:
 
 - Force HTTPS. Enable the managed security/WAF rules available on your plan.
-- Add a **Bypass cache** rule for the entire hostname. Never enable Cache
-  Everything or an Edge TTL override here. All responses also carry `no-store`,
-  including errors and single-use download responses. The operator's private
-  prepared cache avoids rebuilds; it is not a public CDN cache.
+- Keep **Bypass cache** for the hostname, then add a later **Eligible for cache**
+  rule matching only encrypted parts. Replace the hostname in this expression:
+
+  ```text
+  (http.host eq "ggm-patcher.xuetao.host" and http.request.uri.path eq "/" and starts_with(http.request.uri.query, "ggfm-part="))
+  ```
+
+  Keep the complete query string in the cache key. Set Edge TTL by status code
+  to 7 days for HTTP 200 and **no store** for other statuses. This also works
+  with older stable ingress binaries that override origin cache headers. Keep the
+  homepage, service worker, upload, proof, download token and key manifest bypassed.
+  See [rule ordering](https://developers.cloudflare.com/cache/how-to/cache-rules/order/)
+  and [Edge TTL](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/).
+- On HTTPS, the browser registers a service worker scoped to the download route.
+  It redeems the original one-use token and decrypts authenticated 16 MiB parts
+  into a streaming, version-named XAPK. The private cache holds a per-output
+  key. Keep this directory outside the web root. Different builds and key
+  rotations have different part URLs. A cache miss reads that part from the
+  Patcher. A cache hit transfers its bytes from Cloudflare. Browsers which
+  disable service workers or hand the URL to an external downloader retain
+  the existing one-use direct download from the origin.
 - Add an edge rate-limit rule using visitor IP, for example 60 requests/minute
   per IP for `/api/*`, with a temporary block. Cap expensive upload starts more
   tightly if your plan supports multiple rules. Actual rule availability and
@@ -170,7 +187,8 @@ implemented. A 413/524 is an unsuccessful request, not a successful build result
    fallback, HTTPS policy, cache bypass and blocked direct-origin access.
 3. From your own browser, verify a prepared proof/download works. A consumed
    token must not download a cached copy. Inspect response cache headers and
-   Cloudflare cache status; responses must not be HIT/REVALIDATED.
+   Cloudflare cache status. A second authorized download from the same edge
+   should hit the same encrypted parts. Token/key responses must stay uncached.
 4. Confirm logs identify your visitor address, not loopback/a Cloudflare edge.
    Review a controlled staging failure/ban and its expiry; don't run load or ban
    tests on a shared production IP. Check the UI's Retry-After hint.

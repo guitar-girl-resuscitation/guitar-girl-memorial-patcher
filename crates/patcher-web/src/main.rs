@@ -32,6 +32,7 @@ use tokio_util::io::ReaderStream;
 
 mod security;
 mod gateway;
+mod edge;
 
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -460,12 +461,24 @@ async fn update_info(State(state): State<AppState>) -> Json<serde_json::Value> {
     }))
 }
 
-async fn index() -> Response {
+async fn index(State(state): State<AppState>, uri: axum::http::Uri) -> Response {
+    match uri.query() {
+        Some("ggfm-sw=1") => return ([
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, "no-store"),
+        ], include_str!("../../../web/download-sw.js")).into_response(),
+        Some(q) if q.starts_with("ggfm-part=") => {
+            return match edge::part(state.config.cache_root.clone(), q).await {
+                Ok(response) => response, Err(error) => error.into_response(),
+            };
+        }
+        _ => {}
+    }
     (
         [
             (
                 header::CONTENT_SECURITY_POLICY,
-                "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+                "default-src 'self'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; worker-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
             ),
             (header::X_CONTENT_TYPE_OPTIONS, "nosniff"),
             (header::CACHE_CONTROL, "no-store"),
@@ -624,6 +637,7 @@ fn proof_error(error: ChallengeError) -> WebError {
 async fn download(
     State(state): State<AppState>,
     AxumPath(token): AxumPath<String>,
+    uri: axum::http::Uri,
 ) -> Result<Response, WebError> {
     let grant = state.downloads.lock().await.remove(&token).ok_or_else(|| {
         WebError(
@@ -637,12 +651,16 @@ async fn download(
     if let Some(prebuilt) = &state.prebuilt {
         verify_prepared_metadata(prebuilt)?;
     }
-    let file = tokio::fs::File::open(grant.path).await.map_err(internal)?;
+    let file = tokio::fs::File::open(&grant.path).await.map_err(internal)?;
     let length = file.metadata().await.map_err(internal)?.len();
     let version = ggfm_patcher_core::AndroidVersion::deployment(
         state.config.versions.revision,
         state.config.versions.deployment_revision,
     ).expect("version validated before serving");
+    if uri.query() == Some("ggfm-manifest=1") {
+        return tokio::task::spawn_blocking(move || edge::manifest(&grant.path, length, version.version_code))
+            .await.map_err(internal)?;
+    }
     let disposition = format!("attachment; filename=Guitar-Girl-Fan-Memorial-Build-{}.xapk", version.version_code);
     let mut response = (
         [
@@ -893,6 +911,42 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn only_an_unused_grant_can_redeem_a_key_and_only_sealed_parts_can_be_cached() {
+        use aes_gcm::{Aes256Gcm, KeyInit, Nonce, aead::AeadInPlace};
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        let cache = "A".repeat(64);
+        let file = state.config.cache_root.join(format!("{cache}.xapk"));
+        let plain = b"private signed test package";
+        fs::write(&file, plain).unwrap();
+        fs::write(file.with_extension("sha256"), hex::encode(Sha256::digest(plain))).unwrap();
+        let Json(grant) = grant_download(&state, cache.clone(), file.clone()).await.unwrap();
+        let redeem = |t: String| download(State(state.clone()), AxumPath(t), "/?ggfm-manifest=1".parse().unwrap());
+        let response = redeem(grant.download_token.clone()).await.unwrap();
+        let body = axum::body::to_bytes(response.into_body(), 4096).await.unwrap();
+        let manifest: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(redeem(grant.download_token).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        let generation = manifest["generation"].as_str().unwrap();
+        let query = format!("ggfm-part={cache}.{generation}.0");
+        let response = edge::part(state.config.cache_root.clone(), &query).await.unwrap();
+        assert!(edge::may_cache(&format!("/?{query}").parse().unwrap(), &response));
+        assert!(!edge::may_cache(&"/api/v1/download/secret".parse().unwrap(), &response));
+        let mut sealed = axum::body::to_bytes(response.into_body(), 1024).await.unwrap().to_vec();
+        assert_eq!(sealed.len(), plain.len()+16);
+        assert_ne!(&sealed[..plain.len()], plain);
+        let key = hex::decode(manifest["key"].as_str().unwrap()).unwrap();
+        Aes256Gcm::new_from_slice(&key).unwrap().decrypt_in_place(Nonce::from_slice(&[0;12]), &[], &mut sealed).unwrap();
+        assert_eq!(sealed, plain);
+        let Json(next) = grant_download(&state, cache.clone(), file).await.unwrap();
+        let next = redeem(next.download_token).await.unwrap();
+        assert_eq!(axum::body::to_bytes(next.into_body(), 4096).await.unwrap(), body);
+        for invalid in [format!("{query}0"), format!("{query}&extra=1"), query.replace(generation, &"0".repeat(64)),
+                        format!("ggfm-part=../private.{generation}.0"), format!("ggfm-part={cache}.{generation}.1")] {
+            assert_eq!(edge::part(state.config.cache_root.clone(), &invalid).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        }
+    }
+
+    #[tokio::test]
     async fn download_filename_uses_the_serving_workers_android_version() {
         let dir = tempfile::tempdir().unwrap();
         let mut state = test_state(dir.path());
@@ -903,10 +957,10 @@ mod tests {
         let Json(grant) = grant_download(&state, "cache-key".into(), file).await.unwrap();
         let Json(status) = health(State(state.clone())).await;
         let token = grant.download_token;
-        let response = download(State(state.clone()), AxumPath(token.clone())).await.unwrap();
+        let response = download(State(state.clone()), AxumPath(token.clone()), "/".parse().unwrap()).await.unwrap();
         assert_eq!(response.headers()[header::CONTENT_DISPOSITION].to_str().unwrap(),
             format!("attachment; filename=Guitar-Girl-Fan-Memorial-Build-{}.xapk", status.android_version.version_code));
-        assert_eq!(download(State(state), AxumPath(token)).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert_eq!(download(State(state), AxumPath(token), "/".parse().unwrap()).await.unwrap_err().0, StatusCode::NOT_FOUND);
     }
 
     #[tokio::test]
@@ -1031,7 +1085,7 @@ mod tests {
                 .await
                 .is_err()
         );
-        let response = download(State(state.clone()), AxumPath(ready.download_token.clone()))
+        let response = download(State(state.clone()), AxumPath(ready.download_token.clone()), "/".parse().unwrap())
             .await
             .unwrap();
         assert_eq!(response.headers()[header::CONTENT_LENGTH], "23");
@@ -1043,7 +1097,7 @@ mod tests {
             b"cached synthetic result"
         );
         assert!(
-            download(State(state.clone()), AxumPath(ready.download_token))
+            download(State(state.clone()), AxumPath(ready.download_token), "/".parse().unwrap())
                 .await
                 .is_err()
         );

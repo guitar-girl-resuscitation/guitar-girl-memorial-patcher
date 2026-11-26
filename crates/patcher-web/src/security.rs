@@ -449,8 +449,15 @@ pub async fn protect(
     request: Request,
     next: Next,
 ) -> Response {
+    let uri = request.uri().clone();
     let mut response = protect_inner(security.clone(), request, next).await;
+    let encrypted_part = super::edge::may_cache(&uri, &response);
     response_headers(&mut response, security.authority.is_some());
+    if encrypted_part {
+        for name in ["cache-control", "cdn-cache-control", "cloudflare-cdn-cache-control"] {
+            response.headers_mut().insert(name, HeaderValue::from_static(super::edge::PUBLIC_CACHE));
+        }
+    }
     response
 }
 #[derive(Clone, Copy)]

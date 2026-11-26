@@ -42,6 +42,7 @@ jobs:
           cargo test --workspace --locked -j2
           node tools/test-browser-sha256.mjs
           node tools/test-browser-i18n.mjs
+          node tools/test-edge-download.mjs
           python tools/test_deployment.py
           python tools/test_docker.py
           python tools/test_managed.py

@@ -5,6 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+aes-gcm = "0.10"
 axum.workspace = true
 ggfm-patcher-core = { path = "../patcher-core" }
 futures-util.workspace = true

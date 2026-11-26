@@ -154,7 +154,7 @@ The native public configuration uses a **local Cloudflare Tunnel** connector. Th
 
 - Per-IP request/API/upload/download limits and global/per-IP in-flight limits.
 - Eight qualifying failures within ten minutes trigger a fifteen-minute in-process ban. This is not an OS Fail2ban daemon or a Cloudflare account firewall rule; restarting resets this in-memory state.
-- API/download responses are non-cacheable. Configure Cloudflare cache bypass for the deployment hostname; do not use Cache Everything.
+- Keep token, key, and plaintext download responses private. Add a Cloudflare Cache Rule for encrypted `/?ggfm-part=…` responses only. Browsers stream-decrypt the signed XAPK after verification. [Cloudflare rule and verification](docs/PUBLIC_DEPLOYMENT.md#cloudflare-dashboard-rules)
 - One heavy worker; a busy worker rejects new uploads with HTTP 503.
 - Upload: 768 MiB maximum, ten-minute total timeout, thirty-second idle timeout.
 - Archive: 64 entries, 1.5 GiB expanded; per-request work quota 6 GiB; external tool timeout fifteen minutes.
