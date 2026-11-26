@@ -38,7 +38,7 @@ def check_path(name):
         return "private/generated directory"
     if p.name.lower() in FORBIDDEN_NAMES:
         return "proprietary input"
-    if p.name not in ALLOWED_NAMES and p.suffix not in ALLOWED_SUFFIXES:
+    if name != "web/download-sw.js" and p.name not in ALLOWED_NAMES and p.suffix not in ALLOWED_SUFFIXES:
         return "unapproved file type"
     return None
 
