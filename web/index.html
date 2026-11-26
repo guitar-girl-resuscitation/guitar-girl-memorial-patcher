@@ -17,7 +17,7 @@ a{color:var(--accent);text-underline-offset:4px}a:hover{text-decoration-thicknes
   .mobile-start{margin-top:12px;font-weight:700}li{padding-left:38px}.twocol{gap:16px}
   summary{display:list-item;line-height:44px}.links a{min-height:44px}
 }</style></head><body>
-<header><a href="https://github.com/guitar-girl-resuscitation">Guitar Girl / GitHub ↗</a><select id="language" aria-label="Language / 语言"><option value="zh">简体中文</option><option value="en">English</option></select></header>
+<header><a href="https://github.com/guitar-girl-resuscitation">Guitar Girl / GitHub ↗</a><select id="language" aria-label="Language / 语言"><option value="zh">简体中文</option><option value="zh-Hant">繁體中文</option><option value="en">English</option><option value="ja">日本語</option><option value="ko">한국어</option></select></header>
 <main><div class="hero"><h1>Guitar Girl<span>Fan Memorial Build</span></h1><p data-i18n="intro">这是玩家为《吉他少女》做的离线纪念版。补丁会把服务端一起装进游戏，往后即使没有网络，莉莉也能继续弹给你听。</p><a class="mobile-start" href="#patcher" data-i18n="jump">已有原包？前往选择文件 ↓</a></div>
 <div class="layout"><section class="guide"><h2 data-i18n="guide">从原版到纪念版</h2><ol>
 <li><h3 data-i18n="step1">准备原版 XAPK</h3><p data-i18n="get">需要 Android 最终版 Guitar Girl 8.0.0 的完整、未修改 XAPK。先找找自己的下载备份；也可以在 APKPure 等应用目录核对游戏名和版本。请使用你有权使用的副本。</p></li>
@@ -138,12 +138,185 @@ const messages={
 let language='en', statusKey='loadingStatus', statusArgs={}, completed=null;
 Object.assign(messages.zh,{versionsTitle:'当前部署使用的组件 · 源码更新时间（UTC）',unknownVersion:'未记录',versionsPending:'等待读取部署信息'});
 Object.assign(messages.en,{versionsTitle:'Components in this deployment · source updated (UTC)',unknownVersion:'Not recorded',versionsPending:'Waiting for deployment information'});
-try{language=localStorage.getItem('ggfm.language')||(navigator.language.toLowerCase().startsWith('zh')?'zh':'en')}catch{language=navigator.language.toLowerCase().startsWith('zh')?'zh':'en'}
-if(!messages[language])language='en';
+Object.assign(messages, {
+  "zh-Hant": {
+    "intro": "這是玩家為《吉他少女》製作的離線紀念版。套用補丁後，伺服器也會裝進遊戲裡。就算沒有網路，莉莉還是能繼續彈琴給你聽。",
+    "choose": "選擇 Guitar Girl 8.0.0 XAPK",
+    "none": "尚未選擇檔案",
+    "loading": "正在載入設定……",
+    "loadingStatus": "正在讀取網站設定……",
+    "hashing": "正在檢查安裝檔版本……",
+    "large": "檔案超過 768 MiB 上限",
+    "matchedCache": "版本相符，可以開始製作了。",
+    "mismatch": "版本不符，請選擇未修改的 8.0.0 原版 XAPK。",
+    "retry": "請在 {seconds} 秒後再試",
+    "download": "下載紀念版 XAPK",
+    "done": "補丁已套用。下載連結十分鐘內有效，可重新嘗試。",
+    "verifying": "正在確認原版安裝檔並準備紀念版……",
+    "badChallenge": "檔案驗證要求無效",
+    "badRange": "檔案驗證範圍無效",
+    "uploading": "正在上傳並製作紀念版，請稍候……",
+    "verifyButton": "製作紀念版",
+    "supported": "支援 Android 原版 {version} XAPK",
+    "loadFailed": "無法讀取網站設定：{error}",
+    "failed": "操作失敗：{error}",
+    "progress": "安裝檔檢查進度",
+    "guide": "從原版到離線遊玩",
+    "step1": "準備原版 XAPK",
+    "get": "請準備 Android 最終版 Guitar Girl 8.0.0 完整、未修改的 XAPK。可以先找找自己的下載紀錄或備份，也可以在 APKPure 等應用程式目錄核對遊戲名稱與版本。請使用你有權使用的副本。",
+    "step2": "製作並下載",
+    "make": "在這一頁選取原版檔案。版本相符後，點「製作紀念版」，再用出現的下載按鈕將新的 XAPK 儲存到手機。",
+    "step3": "安裝，回去聽歌",
+    "install": "用支援 XAPK 的安裝工具開啟剛下載的紀念版，依照 Android 的提示完成安裝。打開 Guitar Girl Fan Memorial Build，點選啟動，戴上耳機，玩得開心！",
+    "installer": "開放原始碼安裝工具 · Universal Installer ↗",
+    "features": "回到遊戲之後",
+    "feat1": "照自己的步調養成",
+    "feat1body": "多項升級需求降為原版的十分之一；原本需要付費的商店禮包也可以免費領取。",
+    "feat2": "把錯過的限定帶回家",
+    "feat2body": "打開遊戲設定裡的紀念版功能，就能透過信箱領取絕版服裝和吉他、補充資源，也可以切換到喜歡的星級通行證。",
+    "share": "把重逢留給想念她的人",
+    "sharebody": "在論壇或社群平台看到有人懷念《吉他少女》，歡迎回覆，告訴他們可以回來玩了。分享時請只附上專案 GitHub 或本頁連結，也請盡量避免大量發文宣傳。",
+    "noshare": "請勿散布原版或套用補丁後的 XAPK。",
+    "why": "轉傳安裝檔或上傳到共享雲端硬碟，可能讓維護者收到著作權申訴，甚至導致專案下架。謝謝你一起照顧這個小小的專案。",
+    "support": "遇到問題了嗎？",
+    "help": "請告訴我們你的手機型號、紀念版版本，以及在哪個步驟遇到問題。螢幕截圖或診斷紀錄也很有幫助。",
+    "issue": "到 GitHub 回報問題 ↗",
+    "discord": "來 Discord 聊聊 ↗",
+    "footer": "本專案由玩家獨立維護，與 NEOWIZ 無關。遊戲與原作素材的權利歸各權利人所有。",
+    "tech": "建置資訊",
+    "jump": "已經有原版檔案？前往選取 ↓",
+    "versionsTitle": "此網站使用的元件 · 原始碼更新時間（UTC）",
+    "unknownVersion": "未記錄",
+    "versionsPending": "等候讀取版本資訊",
+    "matchedUpload": "版本相符，可以開始製作了。",
+    "uploadButton": "製作紀念版",
+    "build": "製作紀念版"
+  },
+  "ja": {
+    "intro": "ファンが作った『ギター少女』のオフライン記念版です。パッチを適用するとサーバーもゲームに組み込まれるので、ネットにつながっていなくても、またリリーの演奏を聴けます。",
+    "choose": "Guitar Girl 8.0.0 の XAPK を選択",
+    "none": "ファイルが選択されていません",
+    "loading": "設定を読み込み中…",
+    "loadingStatus": "サイトの設定を読み込んでいます…",
+    "hashing": "パッケージのバージョンを確認中…",
+    "large": "ファイルサイズが上限の 768 MiB を超えています",
+    "matchedCache": "バージョンを確認できました。記念版を作成できます。",
+    "mismatch": "バージョンが一致しません。未改変のオリジナル版 8.0.0 XAPK を選んでください。",
+    "retry": "{seconds} 秒後にもう一度お試しください",
+    "download": "記念版 XAPK をダウンロード",
+    "done": "記念版ができました。ダウンロードリンクは10分間有効で、その間は再試行できます。",
+    "verifying": "元のファイルを確認して記念版を準備中…",
+    "badChallenge": "ファイル確認のリクエストが無効です",
+    "badRange": "ファイルの確認範囲が無効です",
+    "uploading": "アップロードして記念版を作成しています…",
+    "verifyButton": "記念版を作成",
+    "supported": "対応ファイル：Android オリジナル版 {version} の XAPK",
+    "loadFailed": "サイトの設定を読み込めませんでした：{error}",
+    "failed": "処理に失敗しました：{error}",
+    "progress": "パッケージの確認状況",
+    "guide": "オフラインで遊ぶまでの手順",
+    "step1": "元の XAPK を用意する",
+    "get": "Android 最終版 Guitar Girl 8.0.0 の、未改変の完全な XAPK が必要です。まずは自分のダウンロードフォルダーやバックアップを探してみてください。ゲーム名とバージョンは APKPure などのアプリカタログでも確認できます。ご自身が利用する権利のあるファイルをお使いください。",
+    "step2": "記念版を作ってダウンロード",
+    "make": "このページで元のファイルを選びます。バージョンを確認できたら「記念版を作成」を押し、表示されたダウンロードボタンで新しい XAPK をスマホに保存してください。",
+    "step3": "インストールして遊ぶ",
+    "install": "ダウンロードした記念版を XAPK 対応のインストーラーで開き、Android の案内に従ってインストールします。Guitar Girl Fan Memorial Build を開いてスタートを押したら、お好きな曲をどうぞ！",
+    "installer": "オープンソースのインストーラー · Universal Installer ↗",
+    "features": "ゲームに戻ったら",
+    "feat1": "自分のペースで育成",
+    "feat1body": "多くの育成項目で、レベルアップに必要な量が原版の10分の1になりました。かつて有料だったショップのパックも無料で受け取れます。",
+    "feat2": "逃した限定アイテムを手元に",
+    "feat2body": "ゲーム設定の記念版メニューから、限定衣装やギター、資源をメールボックスに送れます。好きなシーズンのスターパスにも切り替えられます。",
+    "share": "このゲームを懐かしんでいる人へ",
+    "sharebody": "掲示板やSNSで『ギター少女』が懐かしいという人を見かけたら、また遊べるよ、と返信してもらえるとうれしいです。紹介するリンクはプロジェクトの GitHub かこのページだけにして、大々的な宣伝投稿はお控えください。",
+    "noshare": "元の XAPK もパッチ適用後の XAPK も再配布しないでください。",
+    "why": "ファイルの転載や共有ドライブへのアップロードがきっかけで、運営している有志に著作権の申し立てが届き、公開を続けられなくなることがあります。この場所を一緒に大切にしてくれて、ありがとう。",
+    "support": "困ったときは",
+    "help": "スマホの機種、記念版のバージョン、どの手順で困ったかを教えてください。スクリーンショットや診断ログも手がかりになります。",
+    "issue": "GitHub で問題を報告 ↗",
+    "discord": "Discord で相談 ↗",
+    "footer": "ファンが独立して運営する、NEOWIZ 非公式のプロジェクトです。ゲームおよび原作素材の権利は各権利者に帰属します。",
+    "tech": "ビルド情報",
+    "jump": "XAPK をお持ちの方はファイル選択へ ↓",
+    "versionsTitle": "使用中のコンポーネントとソースの更新日時（UTC）",
+    "unknownVersion": "記録なし",
+    "versionsPending": "バージョン情報を読み込み中",
+    "matchedUpload": "バージョンを確認できました。記念版を作成できます。",
+    "uploadButton": "記念版を作成",
+    "build": "記念版を作成"
+  },
+  "ko": {
+    "intro": "팬들이 만든 기타소녀 오프라인 기념판이에요. 패치를 적용하면 서버가 게임 안에 함께 설치돼서, 인터넷이 없어도 릴리의 연주를 다시 들을 수 있어요.",
+    "choose": "Guitar Girl 8.0.0 XAPK 선택",
+    "none": "선택한 파일 없음",
+    "loading": "설정을 불러오는 중…",
+    "loadingStatus": "사이트 설정을 불러오는 중…",
+    "hashing": "설치 파일 버전을 확인하는 중…",
+    "large": "파일 크기가 768 MiB를 초과해요.",
+    "matchedCache": "버전을 확인했어요. 이제 기념판을 만들 수 있어요.",
+    "mismatch": "버전이 맞지 않아요. 수정하지 않은 8.0.0 원본 XAPK를 선택해 주세요.",
+    "retry": "{seconds}초 후에 다시 시도해 주세요",
+    "download": "기념판 XAPK 다운로드",
+    "done": "기념판이 완성됐어요. 다운로드 링크는 10분 동안 유효하며, 그동안 다시 시도할 수 있어요.",
+    "verifying": "원본 파일을 확인하고 기념판을 준비하는 중…",
+    "badChallenge": "파일 확인 요청이 올바르지 않아요",
+    "badRange": "파일 확인 범위가 올바르지 않아요",
+    "uploading": "파일을 업로드하고 기념판을 만드는 중…",
+    "verifyButton": "기념판 만들기",
+    "supported": "지원 파일: Android {version} 원본 XAPK",
+    "loadFailed": "사이트 설정을 불러올 수 없어요: {error}",
+    "failed": "처리하지 못했어요: {error}",
+    "progress": "설치 파일 확인 진행률",
+    "guide": "오프라인으로 다시 만나는 방법",
+    "step1": "원본 XAPK 준비하기",
+    "get": "Android 최종 버전인 Guitar Girl 8.0.0의 수정되지 않은 전체 XAPK가 필요해요. 다운로드 폴더나 백업을 먼저 찾아보세요. APKPure 같은 앱 목록에서도 게임 이름과 버전을 확인할 수 있어요. 이용 권한이 있는 파일을 사용해 주세요.",
+    "step2": "기념판 만들고 다운로드하기",
+    "make": "이 페이지에서 원본 파일을 선택하세요. 버전 확인이 끝나면 ‘기념판 만들기’를 누르고, 이어서 나타나는 다운로드 버튼으로 새 XAPK를 휴대폰에 저장하세요.",
+    "step3": "설치하고 연주 듣기",
+    "install": "XAPK 설치 앱으로 방금 받은 기념판을 열고 Android 안내에 따라 설치하세요. Guitar Girl Fan Memorial Build를 열고 시작 버튼을 누르면 돼요. 헤드폰을 끼고 즐겁게 플레이하세요!",
+    "installer": "오픈 소스 설치 앱 · Universal Installer ↗",
+    "features": "게임으로 돌아오면",
+    "feat1": "내 속도로 키우기",
+    "feat1body": "여러 성장 항목의 레벨업 요구량을 원작의 10분의 1로 줄였어요. 예전에 유료였던 상점 패키지도 무료로 받을 수 있어요.",
+    "feat2": "놓쳤던 한정 아이템 받기",
+    "feat2body": "게임 설정의 기념판 메뉴에서 한정 의상과 기타, 필요한 재화를 우편함으로 보낼 수 있어요. 원하는 시즌의 스타 패스로 바꿀 수도 있어요.",
+    "share": "기타소녀를 그리워하는 분께",
+    "sharebody": "게시판이나 SNS에서 기타소녀를 그리워하는 분을 만나면, 다시 플레이할 수 있다고 답글을 남겨 주세요. 링크는 프로젝트 GitHub나 이 페이지만 공유해 주시고, 여러 곳에 홍보 글을 올리는 건 삼가 주세요.",
+    "noshare": "원본 XAPK와 패치한 XAPK 모두 재배포하지 말아 주세요.",
+    "why": "설치 파일을 다시 올리거나 공유 드라이브에 올리면 유지보수자에게 저작권 신고가 들어와 프로젝트를 내리게 될 수도 있어요. 이 작은 프로젝트가 계속될 수 있도록 함께 지켜 주셔서 고마워요.",
+    "support": "문제가 생겼나요?",
+    "help": "휴대폰 기종, 기념판 버전, 어느 단계에서 문제가 생겼는지 알려 주세요. 화면 캡처나 진단 로그도 도움이 돼요.",
+    "issue": "GitHub에 문제 신고 ↗",
+    "discord": "Discord에서 이야기하기 ↗",
+    "footer": "팬들이 독립적으로 운영하는 프로젝트이며 NEOWIZ와 관련이 없어요. 게임과 원작 리소스의 권리는 각 권리자에게 있어요.",
+    "tech": "빌드 정보",
+    "jump": "원본이 있나요? 파일 선택으로 이동 ↓",
+    "versionsTitle": "사용 중인 구성 요소 · 소스 업데이트 시각(UTC)",
+    "unknownVersion": "기록 없음",
+    "versionsPending": "버전 정보를 불러오는 중",
+    "matchedUpload": "버전을 확인했어요. 이제 기념판을 만들 수 있어요.",
+    "uploadButton": "기념판 만들기",
+    "build": "기념판 만들기"
+  }
+});
+function preferredLanguage(locales) {
+  for (const tag of locales) {
+    let locale;
+    try { locale = new Intl.Locale(tag); } catch { continue; }
+    if (locale.language === 'zh') return locale.maximize().script === 'Hant' ? 'zh-Hant' : 'zh';
+    if (['en','ja','ko'].includes(locale.language)) return locale.language;
+  }
+  return 'en';
+}
+language = preferredLanguage(navigator.languages?.length ? navigator.languages : [navigator.language]);
+try {
+  const saved = localStorage.getItem('ggfm.language');
+  if (Object.hasOwn(messages, saved)) language = saved;
+} catch {}
 function t(key,args={}){return (messages[language][key]||messages.en[key]||key).replace(/\{(\w+)\}/g,(_,name)=>String(args[name]??''))}
 function show(key,args={}){statusKey=key;statusArgs=args;completed=null;status.className='';status.textContent=t(key,args)}
 function renderVersions(){const cards=['server','patch','patcher'].map(key=>{const card=document.createElement('article'),name=document.createElement('strong'),hash=document.createElement('code'),date=document.createElement('small');name.textContent=key==='server'?'Built-in Server':key==='patch'?'Patch':'Patcher';const value=health?.components?.[key];const commit=/^[0-9a-f]{40}$/i.test(value?.commit||'')?value.commit:'';hash.textContent=commit?commit.slice(0,7):t(health?'unknownVersion':'versionsPending');hash.title=commit;const parsed=value?.sourceUpdatedAt?new Date(value.sourceUpdatedAt):null;date.textContent=parsed&&!Number.isNaN(parsed.valueOf())?parsed.toISOString().replace('T',' ').replace('.000Z',' UTC'):t('unknownVersion');card.replaceChildren(name,hash,date);return card});$('versions').replaceChildren(...cards)}
-function renderLanguage(){document.documentElement.lang=language==='zh'?'zh-Hans':'en';$('language').value=language;document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n));if(!file)$('filename').textContent=t('none');$('upload').textContent=t(health?(health.prebuiltEnabled?'verifyButton':'uploadButton'):'loading');progress.setAttribute('aria-label',t('progress'));renderVersions();if(completed)download(completed);else status.textContent=t(statusKey,statusArgs)}
+function renderLanguage(){document.documentElement.lang=language==='zh'?'zh-Hans':language;$('language').value=language;$('language').setAttribute('aria-label', {zh:'语言','zh-Hant':'語言',ja:'言語',ko:'언어',en:'Language'}[language]);document.querySelectorAll('[data-i18n]').forEach(el=>el.textContent=t(el.dataset.i18n));if(!file)$('filename').textContent=t('none');$('upload').textContent=t(health?(health.prebuiltEnabled?'verifyButton':'uploadButton'):'loading');progress.setAttribute('aria-label',t('progress'));renderVersions();if(completed)download(completed);else status.textContent=t(statusKey,statusArgs)}
 $('language').onchange=()=>{language=$('language').value;try{localStorage.setItem('ggfm.language',language)}catch{}renderLanguage()};
 renderLanguage();
 // Register early, while the user selects and verifies their source. A normal

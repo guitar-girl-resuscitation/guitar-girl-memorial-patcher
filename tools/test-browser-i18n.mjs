@@ -22,7 +22,7 @@ async function page(browserLanguage, stored, blocked=false, prebuilt=true){
   fetch:async()=>({ok:true,json:async()=>({prebuiltEnabled:prebuilt,sourceVersion:'8.0.0',sourceSha256:'ABCD'})}),requestAnimationFrame:cb=>cb()});
  vm.runInContext(script,context);
  await vm.runInContext('ready',context);
- assert.equal(vm.runInContext('Object.keys(messages.zh).sort().join()===Object.keys(messages.en).sort().join()',context),true);
+ assert.equal(vm.runInContext('Object.values(messages).every(dict=>Object.keys(dict).sort().join()===Object.keys(messages.en).sort().join() && Object.keys(dict).every(key=>(dict[key].match(/{\\w+}/g)||[]).sort().join()===(messages.en[key].match(/{\\w+}/g)||[]).sort().join()))',context),true);
  return {context,nodes,document,storage,labels};
 }
 const en=await page('en-US',null);
@@ -59,8 +59,8 @@ vm.runInContext("show('hashing')",en.context);
 assert.equal(en.nodes.get('status').className,'');
 assert.equal(en.nodes.get('upload').disabled,true);
 const zh=await page('zh-TW',null,true,false);
-assert.equal(zh.document.documentElement.lang,'zh-Hans');
-assert.equal(zh.nodes.get('upload').textContent,'制作纪念版');
+assert.equal(zh.document.documentElement.lang,'zh-Hant');
+assert.equal(zh.nodes.get('upload').textContent,'製作紀念版');
 zh.nodes.get('source').files=[{name:'too-large.xapk',size:769*1024*1024}];
 await zh.nodes.get('source').onchange();
 assert.match(zh.nodes.get('status').textContent,/768 MiB/);
@@ -69,3 +69,11 @@ assert.equal((await page('es-ES',null)).document.documentElement.lang,'en');
 assert.equal((await page('zh-CN','en')).document.documentElement.lang,'en');
 assert.equal((await page('en','invalid')).document.documentElement.lang,'en');
 console.log('browser i18n: language detection, storage fallback, key parity, modes, errors and download preservation OK');
+
+for (const [tag,expected] of [['zh-HK','zh-Hant'],['zh-MO','zh-Hant'],['zh-Hans-TW','zh-Hans'],['zh-Hant-CN','zh-Hant'],['zh-SG','zh-Hans'],['ja-JP','ja'],['ko-KR','ko']]) {
+ const view=await page(tag,null);
+ assert.equal(view.document.documentElement.lang,expected);
+ assert.ok(view.labels.every(label=>label.textContent && label.textContent!==label.dataset.i18n));
+}
+assert.equal(vm.runInContext("preferredLanguage(['fr-CA','ko-KR','en'])",en.context),'ko');
+assert.equal((await page('ja-JP','zh-Hant')).document.documentElement.lang,'zh-Hant');
