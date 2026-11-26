@@ -57,6 +57,8 @@ jobs:
       - name: Verify additive LAN hotfix installer
         run: python tools/test_lan_installer.py
       - name: Fetch verified precompiled Patch and Server runtime
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: python tools/fetch_runtime.py --output build/docker-runtime
       - name: Package original software only
         run: >-
