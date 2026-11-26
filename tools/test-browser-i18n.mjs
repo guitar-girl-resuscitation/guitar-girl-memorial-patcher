@@ -34,14 +34,23 @@ vm.runInContext("health.components={server:{commit:'97d8c39dee247f30e9576612eff8
 assert.equal(en.nodes.get('versions').children[0].children[1].textContent,'97d8c39');
 assert.equal(en.nodes.get('versions').children[0].children[2].textContent,'2026-09-06 09:26:51 UTC');
 assert.match(en.nodes.get('status').textContent,/Supports Guitar Girl/);
-vm.runInContext('download({downloadToken:"one-use-token"})',en.context);
+let exchanges=0;
+en.context.fetch=async(url,options)=>{
+ assert.equal(url,'/api/v1/download/one-use-token');
+ assert.equal(options.method,'POST');
+ exchanges++;
+ return {ok:true,json:async()=>({downloadToken:'transfer-link'})};
+};
+await vm.runInContext('prepareDownload({downloadToken:"one-use-token",transferSupported:true})',en.context);
 assert.equal(en.nodes.get('status').className,'complete');
 assert.equal(en.nodes.get('status').children.length,2);
 const url=en.nodes.get('status').children[1].href;
+assert.equal(url,'/api/v1/download/transfer-link');
 en.nodes.get('language').value='zh';en.nodes.get('language').onchange();
 assert.equal(en.storage.value,'zh');
 assert.equal(en.document.documentElement.lang,'zh-Hans');
 assert.equal(en.nodes.get('status').children[1].href,url);
+assert.equal(exchanges,1);
 assert.match(en.nodes.get('status').children[1].textContent,/下载/);
 assert.match(html,/#status\.complete\{[^}]*flex-direction:column[^}]*gap:14px/);
 assert.match(html,/button,a\.button\{display:inline-flex/);

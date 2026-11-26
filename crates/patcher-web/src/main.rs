@@ -123,9 +123,11 @@ struct PreparedSource {
     output_modified: SystemTime,
 }
 
+#[derive(Clone)]
 struct DownloadGrant {
     path: PathBuf,
     expires_at: i64,
+    transfer: bool,
 }
 
 #[derive(Clone)]
@@ -155,6 +157,7 @@ struct Health {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct PatchReady {
+    transfer_supported: bool,
     cache_key: String,
     download_token: String,
     expires_at: i64,
@@ -244,7 +247,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/api/v1/patch", post(patch_upload))
         .route("/api/v1/prebuilt/challenge", post(issue_challenge))
         .route("/api/v1/prebuilt/prove", post(prove_challenge))
-        .route("/api/v1/download/{token}", get(download))
+        .route("/api/v1/download/{token}", get(download).post(start_transfer))
         .with_state(state)
         .layer(axum::middleware::from_fn_with_state(
             security,
@@ -634,12 +637,39 @@ fn proof_error(error: ChallengeError) -> WebError {
     WebError(status, error.to_string())
 }
 
+// Redeem once before exposing a URL to browser navigation or a download
+// manager. Probes and retries use a separate, artifact-scoped capability
+// with the original deadline. Rotation keeps the grant table bounded.
+async fn start_transfer(
+    State(state): State<AppState>,
+    AxumPath(token): AxumPath<String>,
+) -> Result<Json<serde_json::Value>, WebError> {
+    let next = gateway::tag_token(&random_token()?);
+    let mut downloads = state.downloads.lock().await;
+    let grant = downloads.get(&token).filter(|grant| !grant.transfer)
+        .ok_or_else(|| WebError(StatusCode::NOT_FOUND, "unknown or consumed download token".into()))?;
+    if unix_now() > grant.expires_at {
+        return Err(WebError(StatusCode::GONE, "download grant expired".into()));
+    }
+    let transfer = DownloadGrant { transfer: true, ..grant.clone() };
+    downloads.remove(&token);
+    downloads.insert(next.clone(), transfer);
+    Ok(Json(serde_json::json!({ "downloadToken": next })))
+}
+
 async fn download(
     State(state): State<AppState>,
     AxumPath(token): AxumPath<String>,
     uri: axum::http::Uri,
 ) -> Result<Response, WebError> {
-    let grant = state.downloads.lock().await.remove(&token).ok_or_else(|| {
+    let grant = {
+        let mut downloads = state.downloads.lock().await;
+        if downloads.get(&token).is_some_and(|grant| grant.transfer) {
+            downloads.get(&token).cloned()
+        } else {
+            downloads.remove(&token)
+        }
+    }.ok_or_else(|| {
         WebError(
             StatusCode::NOT_FOUND,
             "unknown or consumed download token".into(),
@@ -831,8 +861,9 @@ async fn grant_download(
             "download capacity reached; retry later".into(),
         ));
     }
-    downloads.insert(token.clone(), DownloadGrant { path, expires_at });
+    downloads.insert(token.clone(), DownloadGrant { path, expires_at, transfer: false });
     Ok(Json(PatchReady {
+        transfer_supported: true,
         cache_key,
         download_token: token,
         expires_at,
@@ -944,6 +975,31 @@ mod tests {
                         format!("ggfm-part=../private.{generation}.0"), format!("ggfm-part={cache}.{generation}.1")] {
             assert_eq!(edge::part(state.config.cache_root.clone(), &invalid).await.unwrap_err().0, StatusCode::NOT_FOUND);
         }
+    }
+
+    #[tokio::test]
+    async fn a_verified_transfer_survives_manifest_probe_and_download_manager_retry() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = test_state(dir.path());
+        let cache = "B".repeat(64);
+        let file = state.config.cache_root.join(format!("{cache}.xapk"));
+        let bytes = b"signed package";
+        fs::write(&file, bytes).unwrap();
+        fs::write(file.with_extension("sha256"), hex::encode(Sha256::digest(bytes))).unwrap();
+        let Json(grant) = grant_download(&state, cache, file).await.unwrap();
+        let exchange = |t: String| start_transfer(State(state.clone()), AxumPath(t));
+        let Json(result) = exchange(grant.download_token.clone()).await.unwrap();
+        let link = result["downloadToken"].as_str().unwrap().to_owned();
+        assert_eq!(exchange(grant.download_token).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        assert_eq!(exchange(link.clone()).await.unwrap_err().0, StatusCode::NOT_FOUND);
+        let get = |uri: &str| download(State(state.clone()), AxumPath(link.clone()), uri.parse().unwrap());
+        for _ in 0..2 {
+            assert_eq!(get("/?ggfm-manifest=1").await.unwrap().status(), StatusCode::OK);
+            let response = get("/").await.unwrap();
+            assert_eq!(axum::body::to_bytes(response.into_body(), 128).await.unwrap().as_ref(), bytes);
+        }
+        state.downloads.lock().await.get_mut(&link).unwrap().expires_at = unix_now() - 1;
+        assert_eq!(get("/").await.unwrap_err().0, StatusCode::GONE);
     }
 
     #[tokio::test]

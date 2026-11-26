@@ -96,13 +96,13 @@ Apply to the dedicated Patcher hostname, not unrelated sites in the zone:
   See [rule ordering](https://developers.cloudflare.com/cache/how-to/cache-rules/order/)
   and [Edge TTL](https://developers.cloudflare.com/cache/how-to/cache-rules/settings/).
 - On HTTPS, the browser registers a service worker scoped to the download route.
-  It redeems the original one-use token and decrypts authenticated 16 MiB parts
+  The page first redeems the one-use grant for a retryable transfer link. The service worker uses that link to fetch the private manifest and decrypts authenticated 16 MiB parts
   into a streaming, version-named XAPK. The private cache holds a per-output
   key. Keep this directory outside the web root. Different builds and key
   rotations have different part URLs. A cache miss reads that part from the
   Patcher. A cache hit transfers its bytes from Cloudflare. Browsers which
   disable service workers or hand the URL to an external downloader retain
-  the existing one-use direct download from the origin.
+  the same time-limited direct download from the origin.
 - Add an edge rate-limit rule using visitor IP, for example 60 requests/minute
   per IP for `/api/*`, with a temporary block. Cap expensive upload starts more
   tightly if your plan supports multiple rules. Actual rule availability and

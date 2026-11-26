@@ -33,7 +33,7 @@ minutes total or thirty seconds without a chunk.
 Prebuilt mode is opt-in. The operator source remains outside the repository.
 The browser must first match the public full-file hash, then answer a fresh,
 single-use challenge containing eight random 64 KiB ranges. A successful proof
-grants a ten-minute, one-use download token for an operator-verified cached
+grants a one-use token that the page exchanges for a retryable ten-minute download link for an operator-verified cached
 output. At startup, the server validates the operator source and builds or
 verifies the cached output before enabling this mode. No valid operator file
 means automatic full-upload mode, not a broken prebuilt button. The browser

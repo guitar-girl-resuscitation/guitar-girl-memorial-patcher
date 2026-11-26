@@ -144,7 +144,7 @@ The service validates dependencies before opening its loopback listener. Use one
 
 Set `prebuilt.operatorSourceXapk` to a private original file to opt into prebuilt mode. The service validates it and prepares/verifies the output at startup. Without a usable operator source it falls back to full uploads.
 
-The possession challenge uses eight random 64 KiB ranges, expires after three minutes and is single-use. The resulting download token lasts ten minutes and is single-use. Reporting a known public hash alone is not enough.
+The possession challenge uses eight random 64 KiB ranges, expires after three minutes and is single-use. The page redeems the resulting token once for a retryable link to the same build. Both expire ten minutes after verification. Reporting a known public hash alone is not enough.
 
 Cache identity includes source, exact Patch/Server versions and hashes, policy, application ID, signer and relevant tooling. Source/cache files must remain immutable while serving; replace them through a deliberate deployment restart. Never expose source, work, cache or signing directories as static files. Cached output contains game assets and must not be uploaded to GitHub.
 
