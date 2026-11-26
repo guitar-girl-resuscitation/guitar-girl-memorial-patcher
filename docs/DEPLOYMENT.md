@@ -140,8 +140,17 @@ The immutable generation configuration and last active pair survive restart.
 
 To pause checks, set `GGFM_AUTO_UPDATE=0` (Docker or native), or use
 `--no-updates`. The active generation still runs. No update deletes the old
-signing key, original source or saves. Old generations/caches are retained:
-set a filesystem quota and monitor disk usage; there is no automatic pruning.
+signing key, original source or saves. The supervisor checks retention hourly,
+including when update polling is disabled. It waits for the retired worker to
+drain and keeps the active and recorded rollback generations, shared runtimes
+and bootstrap inputs. It removes obsolete managed artifacts, source checkouts,
+virtual environments, generation configs and same-deployment cached XAPKs after
+observing them unused for at least 24 hours. Initial observation is a grace
+period even for older installations. Keep the cache and update directories
+dedicated to this deployment. Reserve space for a new build during the grace
+period. Existing native installations need the updated `worker/deploy/run_managed.py`
+and one supervisor restart. Docker installations need the updated supervisor
+in their image or a bind mount over `/opt/ggfm/docker/run_managed.py`.
 
 `/api/v1/update` advertises only the running generation's version, application
 ID and signer. Packages embed this deployment's validated HTTPS origin. The
@@ -160,8 +169,12 @@ Docker 默认使用独立入口自动检查 Patcher 与 Patch 的 GitHub 发布�
 版本号，不随访客下载或进程重启增加，失败版本号也不复用。
 
 原包、签名密钥、配置、缓存及 `/data/updates` 必须持久化，不能升级时清空。
-用 `GGFM_AUTO_UPDATE=0` 可暂停更新。旧版本与缓存不会自动清理，请配置磁盘
-配额并监控容量。基础系统依赖不兼容时拒绝更新，仍可能需要部署者更新基础镜像。
+用 `GGFM_AUTO_UPDATE=0` 可暂停更新。新版常驻入口每小时检查一次，等旧下载排空，
+保留当前版、回滚版及它们使用的文件。其他托管产物首次确认闲置满 24 小时后自动回收，
+包括历史纪念版 XAPK 和已无引用的分块密钥。首次启用也有同样的宽限期。
+旧版宝塔部署需覆盖 `worker/deploy/run_managed.py` 并重启一次 Patcher 进程；
+容器部署需更新入口脚本或挂载到 `/opt/ggfm/docker/run_managed.py`。之后无需定期手动清理。
+请使用独立缓存目录，给构建和宽限期留足磁盘空间。
 游戏内更新提示只返回产出此包的站点，不自动安装，也不会上传玩家存档。
 
 ## Quotas

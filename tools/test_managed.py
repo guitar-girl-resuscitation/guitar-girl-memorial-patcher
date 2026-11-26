@@ -5,6 +5,7 @@ The fixture is our own tiny worker, not an APK patching acceptance substitute.
 No GitHub writes, signing secrets, game data or installed applications are used.
 """
 import hashlib
+import io
 import importlib.util
 import json
 import os
@@ -39,6 +40,79 @@ class Handler(BaseHTTPRequestHandler):
 host, port = c["listen"].split(":")
 HTTPServer((host, int(port)), Handler).serve_forever()
 '''
+
+
+class RetentionTests(unittest.TestCase):
+    def test_rotation_grace_shared_keys_and_operator_files(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            cache = root / "cache"
+            cache.mkdir()
+            for name in ("artifacts", "sources", "python", "generations"):
+                (root / name).mkdir()
+            identity = {"applicationId": "org.example.game", "origin": "https://example.org", "signer": "AB"*32}
+            base = {"cacheRoot": str(cache)}
+            state = {"counter": 5, "identity": identity}
+            def generation(i):
+                directory = root / "artifacts" / (str(i)*64)
+                directory.mkdir()
+                binary = directory / "worker"
+                binary.touch()
+                (directory / "release.zip").touch()
+                config = root / "generations" / f"{i}.json"
+                config.write_text("{}")
+                return dict(revision=i, binary=str(binary), config=str(config))
+            def package(i, name, origin=None):
+                path = cache / (name*64 + ".xapk")
+                apk = io.BytesIO()
+                code = 800000+i
+                with zipfile.ZipFile(apk, "w") as inner:
+                    inner.writestr("assets/ggfm/update-source.json", json.dumps({
+                        "schema": 1, "origin": origin or identity["origin"], "applicationId":identity["applicationId"],
+                        "signerSha256":identity["signer"], "versionCode":code}))
+                with zipfile.ZipFile(path, "w") as outer:
+                    outer.writestr("manifest.json", json.dumps({"package_name":identity["applicationId"],
+                        "version_name":f"8.0.0-memorial.{i}", "version_code":str(code)}))
+                    outer.writestr(identity["applicationId"] + ".apk", apk.getvalue())
+                path.with_suffix(".sha256").write_text(name*64)
+                return path
+            generations = [generation(i) for i in range(1,6)]
+            shared = root / "sources" / ("a"*40)
+            (shared / ".git").mkdir(parents=True)
+            Path(generations[3]["config"]).write_text(json.dumps({"patchRoot": str(shared)}))
+            if sys.platform == "linux":
+                (Path(generations[1]["binary"]).parent / "linked-checkout").symlink_to(shared, target_is_directory=True)
+            packages = [package(i,str(i)) for i in range(1,6)]
+            foreign = package(1, "A", "https://someone-else.example")
+            operator = package(1, "B")
+            base["prebuilt"] = {"operatorSourceXapk":str(operator)}
+            state.update(active=generations[3], previous=generations[2])
+            key = cache / ("1"*64 + ".edge-key")
+            key.touch()
+            packages[2].with_suffix(".sha256").write_text("1"*64)
+            unknown = root / "artifacts" / ("f"*64)
+            unknown.mkdir()
+            def sweep(t):
+                m.prune_managed(root,base,state,[generations[0]["binary"]],t)
+            sweep(100)
+            self.assertTrue(all(p.exists() for p in packages))
+            # New active and rollback after a restart; formerly pending revision 5 is now live.
+            state.update(active=generations[4], previous=generations[3])
+            sweep(100+m.RETENTION_GRACE)
+            self.assertFalse(packages[0].exists())
+            self.assertFalse(packages[1].exists())
+            self.assertTrue(all(p.exists() for p in packages[2:]))
+            self.assertTrue(key.is_file())
+            sweep(100+2*m.RETENTION_GRACE)
+            self.assertFalse(packages[2].exists())
+            self.assertFalse(key.exists())
+            self.assertTrue(all(p.exists() for p in packages[3:]))
+            self.assertTrue(unknown.is_dir() and foreign.is_file() and operator.is_file())
+            self.assertTrue(Path(generations[0]["binary"]).is_file())
+            self.assertFalse(Path(generations[1]["binary"]).parent.exists())
+            self.assertTrue(Path(generations[3]["binary"]).is_file())
+            self.assertTrue(Path(generations[4]["config"]).is_file())
+            self.assertTrue((shared / ".git").is_dir())
 
 
 class ArchiveTests(unittest.TestCase):

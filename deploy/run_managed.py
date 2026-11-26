@@ -555,6 +555,174 @@ class BlueGreen:
             stop(self.retired[1])
 
 
+RETENTION_GRACE = 24 * 3600
+
+
+def configured_paths(value):
+    """Protect operator inputs as well as the files named by retained generations."""
+    if isinstance(value, dict):
+        for item in value.values():
+            yield from configured_paths(item)
+    elif isinstance(value, list):
+        for item in value:
+            yield from configured_paths(item)
+    elif isinstance(value, str) and os.path.isabs(value):
+        path = Path(value)
+        yield path
+        yield path.resolve()  # a configured symlink may refer to a managed file
+
+
+def archive_json(archive, name):
+    member = archive.getinfo(name)
+    if member.file_size > 128 * 1024:
+        raise ValueError("unexpected package metadata size")
+    return json.loads(archive.read(member))
+
+
+def cached_revision(path, identity, verify_source=False):
+    """Legacy caches have no generation index. Read only our own output metadata."""
+    try:
+        with zipfile.ZipFile(path) as archive:
+            manifest = archive_json(archive, "manifest.json")
+            revision = int(manifest["version_code"]) - 800000
+            app = identity["applicationId"]
+            if not app or manifest["package_name"] != app or revision <= 0 or (
+                    manifest["version_name"] != f"8.0.0-memorial.{revision}"):
+                return None
+            if verify_source:
+                member = archive.getinfo(f"{app}.apk")
+                if member.compress_type != zipfile.ZIP_STORED or member.file_size > 384 * 1024**2:
+                    return None
+                with archive.open(member) as apk, zipfile.ZipFile(apk) as base:
+                    source = archive_json(base, "assets/ggfm/update-source.json")
+                if (source.get("schema") != 1 or source.get("applicationId") != app
+                        or source.get("versionCode") != 800000 + revision
+                        or source.get("origin") != identity["origin"]
+                        or source.get("signerSha256", "").upper() != identity["signer"].replace(":", "").upper()):
+                    return None
+            return revision
+    except (ValueError, TypeError, AttributeError, KeyError, EOFError, OSError, zipfile.BadZipFile):
+        return None
+
+
+def prune_managed(root, base, state, bootstrap, now):
+    """Called only by the elected supervisor, outside staging and after drain."""
+    root = root.resolve()
+    keep = set(configured_paths([base, bootstrap]))
+    revisions = set()
+    for generation in (state["active"], state.get("previous")):
+        if generation is None:
+            continue
+        keep.update(configured_paths(generation))
+        config = json.loads(Path(generation["config"]).read_text())
+        keep.update(configured_paths(config))
+        revisions.add(generation.get("outputRevision") or generation["revision"])
+        original = root / "generations" / f"{generation['revision']}.json"
+        if original.is_file():
+            keep.update(configured_paths(json.loads(original.read_text())))
+    protected = keep | {parent for path in keep for parent in path.parents}
+    # ismount() alone misses same-filesystem bind mounts on Linux. Protect the
+    # whole candidate tree if it contains any mounted directory or file.
+    if sys.platform == "linux":
+        for line in Path("/proc/self/mountinfo").read_text().splitlines():
+            raw = line.split()[4]
+            mount = Path(re.sub(r"\\([0-7]{3})", lambda m: chr(int(m[1], 8)), raw))
+            protected.update((mount, *mount.parents))
+    # Only enumerate immediate, supervisor-named children. Do not follow symlinks
+    # or use recorded cleanup paths as deletion instructions on a later run.
+    candidates = {}
+    def consider(path, kind):
+        if path not in protected and not path.is_symlink() and not os.path.ismount(path):
+            candidates[path] = kind
+
+    for name, pattern in (("artifacts", "[0-9a-f]{64}"), ("sources", "[0-9a-f]{40}"),
+                          ("python", "[0-9a-f]{64}"), ("generations", r"[0-9]+\.json")):
+        parent = root / name
+        if not parent.is_dir() or parent.is_symlink():
+            continue
+        for path in parent.iterdir():
+            if not re.fullmatch(pattern, path.name):
+                continue
+            if name == "generations":
+                revision = int(path.stem)
+                if revision not in revisions and revision <= state["counter"] and path.is_file():
+                    consider(path, "file")
+            elif path.is_dir() and any((path / marker).exists() for marker in {
+                    "artifacts": ("release.zip", "download.partial"),
+                    "sources": (".git",), "python": ("pyvenv.cfg",)}[name]):
+                consider(path, "tree")
+    for path in root.glob("runtime-*-*.json"):
+        if re.fullmatch(r"runtime-\d+-\d+\.json", path.name) and path.is_file():
+            consider(path, "file")
+
+    cache = Path(base["cacheRoot"])
+    identity = state["identity"]
+    if not identity["applicationId"]:
+        profile = json.loads(Path(base["compatibilityManifest"]).read_text())
+        identity = dict(identity, applicationId=profile["output"]["applicationId"])
+    # A legacy revision 0 has no reliable Android revision until its first
+    # successful health check. Leave its cache alone while it is protected.
+    if 0 not in revisions and cache.is_absolute() and cache.resolve() == cache and cache.is_dir():
+        for path in cache.glob("*.xapk"):
+            if not re.fullmatch("[A-F0-9]{64}", path.stem) or path.is_symlink() or not path.is_file():
+                continue
+            revision = cached_revision(path, identity)
+            if revision and revision <= state["counter"] and revision not in revisions:
+                side = path.with_suffix(".sha256")
+                if side.is_file() and not side.is_symlink() and side.stat().st_size <= 128 and side not in protected:
+                    consider(path, "package")
+
+    journal = root / "retention.json"
+    previous = json.loads(journal.read_text()) if journal.exists() else {}
+    pending = {}
+    removed = 0
+    for path, kind in candidates.items():
+        since = previous.get(str(path), now)
+        if not isinstance(since, (int, float)) or since <= 0:
+            since = now
+        if now - since < RETENTION_GRACE:
+            pending[str(path)] = min(since, now)
+            continue
+        if kind == "tree":
+            # Preflight every entry before deleting anything. Directory symlinks
+            # inside a venv or checkout are unlinked as leaves, never traversed.
+            leaves, directories = [], []
+            for directory, dirs, files in os.walk(path, followlinks=False):
+                here = Path(directory)
+                if here.resolve() != here or os.path.ismount(here):
+                    raise ValueError("unexpected mount or redirect in managed tree")
+                directories.append(here)
+                leaves.extend(here / f for f in files)
+                leaves.extend(here / d for d in dirs if (here / d).is_symlink())
+            for leaf in leaves:
+                leaf.unlink()
+            for directory in reversed(directories):
+                directory.rmdir()
+        elif kind == "package":
+            if cached_revision(path, identity, verify_source=True) is None:
+                continue
+            side = path.with_suffix(".sha256")
+            checksum = side.read_text().strip()
+            if not re.fullmatch("[A-Fa-f0-9]{64}", checksum):
+                continue
+            path.unlink()
+            side.unlink()
+            key = cache / (checksum.upper() + ".edge-key")
+            if key.is_file() and not key.is_symlink() and key not in protected:
+                # Another cached output can share its content digest.
+                if not any(s.is_symlink() or not s.is_file() or s.stat().st_size > 128 or
+                           s.read_bytes().strip().upper() == checksum.upper().encode()
+                           for s in cache.glob("*.sha256")):
+                    key.unlink()
+        else:
+            path.unlink()
+        removed += 1
+    if previous != pending:
+        atomic_json(journal, pending)
+    if removed:
+        log(f"Retention removed {removed} obsolete managed entries")
+
+
 def main():
     import fcntl
     parser = argparse.ArgumentParser()
@@ -606,7 +774,8 @@ def main():
         initial = ready(active, child)
         if not initial:
             raise RuntimeError("initial worker failed readiness")
-        state["counter"] = max(state["counter"], initial_revision(initial, active))
+        active["outputRevision"] = initial_revision(initial, active)
+        state["counter"] = max(state["counter"], active["outputRevision"])
         # Include generations allocated just before a power loss/state-file commit.
         for path in (root / "generations").glob("*.json"):
             if path.stem.isdigit():
@@ -617,11 +786,19 @@ def main():
             blue.start_gateway(active)
             log("Stable ingress enabled; updates keep old downloads online")
         next_check = 0
+        next_cleanup = 0
         while not STOP:
             if blue:
                 active, child = blue.maintain(active, child, state, state_path)
             elif child.poll() is not None:
                 raise RuntimeError("active worker exited; service manager may restart this supervisor")
+            if time.monotonic() >= next_cleanup and not (blue and blue.retired):
+                next_cleanup = time.monotonic() + 3600
+                try:
+                    prune_managed(root, base, state, [str(args.binary.resolve()),
+                        str(args.config.resolve()), str(gateway_binary.resolve())], int(time.time()))
+                except (OSError, TypeError, ValueError, KeyError) as error:
+                    log(f"Retention deferred ({type(error).__name__}); worker remains online")
             if not args.no_updates and time.monotonic() >= next_check:
                 next_check = time.monotonic() + args.interval
                 candidate_child = None
