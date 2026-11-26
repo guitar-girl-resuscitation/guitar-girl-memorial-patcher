@@ -27,13 +27,14 @@ async function page(browserLanguage, stored, blocked=false, prebuilt=true){
 }
 const en=await page('en-US',null);
 assert.equal(en.document.documentElement.lang,'en');
-assert.equal(en.nodes.get('upload').textContent,'Verify and download');
+assert.equal(en.nodes.get('upload').textContent,'Build memorial edition');
 assert.equal(en.nodes.get('versions').children.length,3);
 assert.equal(en.nodes.get('versions').children[0].children[1].textContent,'Not recorded');
 vm.runInContext("health.components={server:{commit:'97d8c39dee247f30e9576612eff88022ba063c40',sourceUpdatedAt:'2026-09-06T09:26:51Z'}};renderVersions()",en.context);
 assert.equal(en.nodes.get('versions').children[0].children[1].textContent,'97d8c39');
 assert.equal(en.nodes.get('versions').children[0].children[2].textContent,'2026-09-06 09:26:51 UTC');
-assert.match(en.nodes.get('status').textContent,/Supports Guitar Girl/);
+assert.match(en.nodes.get('status').textContent,/Supports the original Android 8.0.0 XAPK/);
+assert.ok(en.labels.every(label=>label.textContent && label.textContent!==label.dataset.i18n));
 let exchanges=0;
 en.context.fetch=async(url,options)=>{
  assert.equal(url,'/api/v1/download/one-use-token');
@@ -59,7 +60,7 @@ assert.equal(en.nodes.get('status').className,'');
 assert.equal(en.nodes.get('upload').disabled,true);
 const zh=await page('zh-TW',null,true,false);
 assert.equal(zh.document.documentElement.lang,'zh-Hans');
-assert.match(zh.nodes.get('upload').textContent,/完整上传/);
+assert.equal(zh.nodes.get('upload').textContent,'制作纪念版');
 zh.nodes.get('source').files=[{name:'too-large.xapk',size:769*1024*1024}];
 await zh.nodes.get('source').onchange();
 assert.match(zh.nodes.get('status').textContent,/768 MiB/);

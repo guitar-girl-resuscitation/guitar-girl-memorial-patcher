@@ -1,45 +1,130 @@
 <!doctype html>
-<html lang="zh-Hans">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Guitar Girl Fan Memorial Build Patcher</title>
-<style>
-  :root{color-scheme:light;--pink:#ef5f87;--ink:#512d3a;--paper:#fff9fb;--line:#f1ced9}
-  *{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#ffe8ef,#fff 52%,#fff2cd);color:var(--ink);font:16px/1.55 system-ui,sans-serif;min-height:100vh}
-  main{max-width:760px;margin:auto;padding:7vh 20px}section{background:#fffcfdde;border:1px solid var(--line);border-radius:24px;padding:30px;box-shadow:0 24px 80px #ad62712c}
-  h1{font-size:clamp(27px,5vw,44px);line-height:1.08;margin:0 0 12px}p{margin:8px 0}.muted{color:#84606c}label.drop{display:block;border:2px dashed #ef9ab3;border-radius:18px;padding:28px;margin:24px 0;text-align:center;cursor:pointer;background:#fff}
-  input[type=file]{position:absolute;opacity:0;width:1px;height:1px}button,a.button{appearance:none;border:0;border-radius:999px;padding:12px 19px;font-weight:700;background:var(--pink);color:white;text-decoration:none;cursor:pointer;margin:5px}button.secondary{background:#845e6b}button:disabled{opacity:.45;cursor:not-allowed}
-  progress{width:100%;height:13px;accent-color:var(--pink)}#status{white-space:pre-wrap;min-height:3em;background:#fff4f7;border-radius:14px;padding:13px;margin-top:18px}.actions{display:flex;flex-wrap:wrap;justify-content:center}.hash{font:12px ui-monospace,monospace;overflow-wrap:anywhere}
-  button,a.button{display:inline-flex;align-items:center;justify-content:center;max-width:100%;min-height:44px;line-height:1.5;white-space:normal;overflow-wrap:anywhere;text-align:center}
-  #status{overflow-wrap:anywhere}#status.complete{display:flex;flex-direction:column;align-items:flex-start;gap:14px;white-space:normal}#status.complete p{margin:0}#status.complete a.button{margin:0}
-  #filename{overflow-wrap:anywhere}select{font:inherit;max-width:100%}
-  #versions{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;margin-top:12px}#versions article{padding:12px;border:1px solid var(--line);border-radius:12px;min-width:0}#versions strong,#versions code,#versions small{display:block;overflow-wrap:anywhere}#versions code{margin:4px 0}#versions small{font-size:12px}.version-note{margin-top:24px}
-  @media(max-width:480px){main{padding:24px 12px}section{padding:22px 18px}label.drop{padding:22px 14px}}
-</style>
-<main><section>
-  <p style="text-align:right"><label for="language">Language / 语言 </label><select id="language"><option value="zh">简体中文</option><option value="en">English</option></select></p>
-  <h1>Guitar Girl<br>Fan Memorial Build</h1>
-  <p data-i18n="intro">选择你自己持有的原版 XAPK。文件会先在浏览器中分块计算 SHA-256；不匹配的版本不会上传。</p>
-  <p class="muted" data-i18n="privacy">公开源码不包含游戏。完整上传模式会删除临时原包；部署者启用私有预置模式后，校验通过即可下载已缓存成品，仅上传随机校验分块。</p>
-  <label class="drop" for="source"><strong data-i18n="choose">选择 Guitar Girl 8.0.0 XAPK</strong><br><span id="filename" class="muted">尚未选择</span></label>
-  <!-- Android document providers do not consistently assign XAPK a MIME type.
-       Leave the picker unrestricted; SHA-256 allowlisting gates every upload. -->
-  <input id="source" type="file">
-  <progress id="progress" max="1" value="0"></progress>
-  <p id="hash" class="hash"></p>
-  <div class="actions">
-    <button id="upload" disabled>读取配置中……</button>
-  </div>
-  <div id="status">正在读取部署配置……</div>
-  <p class="muted version-note" data-i18n="versionsTitle">当前部署使用的组件 · 源码更新时间（UTC）</p>
-  <div id="versions" aria-live="polite"></div>
-</section></main>
+<html lang="zh-Hans"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#16141d"><title>Guitar Girl Fan Memorial Build · Patcher</title>
+<style>:root{color-scheme:dark;--bg:#16141d;--panel:#23202b;--ink:#faf5f8;--sub:#c9c1ce;--accent:#ffb5c7;--line:#514653;font:16px/1.65 "DM Sans",system-ui,sans-serif}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink)}main,header,footer{width:min(1060px,100% - 40px);margin:auto}header,footer{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;padding:18px 0;border-bottom:1px solid var(--line)}header>a{font-weight:700}select{background:var(--panel);color:var(--ink);border:1px solid var(--line);padding:7px;border-radius:7px;font:inherit}
+a{color:var(--accent);text-underline-offset:4px}a:hover{text-decoration-thickness:2px}a:focus-visible,button:focus-visible,select:focus-visible,summary:focus-visible,.drop:focus-within{outline:3px solid var(--accent);outline-offset:4px}
+.hero{padding:clamp(32px,6vw,76px) 0 36px;background:radial-gradient(ellipse at 10% 30%,#39273466,transparent 65%)}h1,h2,h3,p{margin:0}h1{font-size:clamp(40px,6.5vw,82px);line-height:1.06;letter-spacing:-.045em}h1 span{display:block;color:var(--accent)}.hero p{max-width:640px;margin:22px 0 0;font-size:1.1rem;color:var(--sub)}h2{font-size:clamp(23px,3vw,32px);line-height:1.3;letter-spacing:-.025em}h3{font-size:1.12rem;line-height:1.45;margin-bottom:5px}
+.layout{display:grid;grid-template-columns:1.12fr 1fr;gap:clamp(24px,5vw,64px);align-items:start}.guide{padding-top:8px}ol{padding:0;list-style:none;counter-reset:steps}li{counter-increment:steps;position:relative;padding:0 0 22px 48px}li:before{content:counter(steps,decimal-leading-zero);position:absolute;left:0;top:0;color:var(--accent);font:18px/1.55 "IBM Plex Mono",monospace}li p,article p,.support p,footer{color:var(--sub)}li p+a{display:inline-block;margin-top:7px}
+.tool{padding:clamp(20px,3vw,32px);background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:12px}.drop{display:grid;gap:4px;background:#2c2632;border:1px dashed #a98595;padding:23px 14px;border-radius:8px;margin:20px 0 12px;text-align:center;cursor:pointer}.drop:hover{background:#372d3a}.drop input{position:absolute;width:1px;height:1px;opacity:0}.muted,#filename{color:var(--sub)}#filename,#status,#hash{overflow-wrap:anywhere}button,a.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;max-width:100%;padding:10px 20px;border:0;border-radius:7px;background:var(--accent);color:#30202a;text-decoration:none;line-height:1.45;font-family:inherit;font-size:1rem;font-weight:700;cursor:pointer}button:disabled{color:#c9c1ce;background:#47404c;cursor:not-allowed}.actions button{width:100%}progress{width:100%;height:6px;accent-color:var(--accent);display:block;margin:14px 0}#status{margin-top:12px;color:var(--sub);font-size:.94rem}#status.complete{display:flex;flex-direction:column;align-items:flex-start;gap:14px}
+.band,.sharing,details{margin:24px 0;padding:28px 0;border-top:1px solid var(--line)}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:24px 48px;margin-top:20px}.sharing{border-left:3px solid var(--accent);padding:20px 24px;background:#251f29}.sharing p,.support p{margin-top:10px}.sharing strong{color:var(--accent)}.links{display:flex;flex-wrap:wrap;gap:12px;margin-top:16px}.links a{border:1px solid var(--line);border-radius:6px;padding:9px 14px;text-decoration:none}.links a:hover{border-color:var(--accent)}summary{cursor:pointer;font-weight:700}#versions{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-top:10px}#versions article>*{display:block}code,small{color:var(--sub)}footer{font-size:.88rem;border-top:1px solid var(--line);border-bottom:0}.version-note{margin-top:14px}
+@media(max-width:720px){.layout,.twocol{grid-template-columns:1fr}.layout{gap:10px}.hero{padding-top:32px}.tool{margin-bottom:10px}header,main,footer{width:calc(100% - 32px)}li{padding-left:38px}.twocol{gap:16px}}</style></head><body>
+<header><a href="https://github.com/guitar-girl-resuscitation">Guitar Girl / GitHub ↗</a><label>Language / 语言 <select id="language"><option value="zh">简体中文</option><option value="en">English</option></select></label></header>
+<main><div class="hero"><h1>Guitar Girl<span>Fan Memorial Build</span></h1><p data-i18n="intro">这是玩家为《吉他少女》做的离线纪念版。补丁会把服务端一起装进游戏，往后即使没有网络，莉莉也能继续弹给你听。</p></div>
+<div class="layout"><section class="guide"><h2 data-i18n="guide">从原版到纪念版</h2><ol>
+<li><h3 data-i18n="step1">准备原版 XAPK</h3><p data-i18n="get">需要 Android 最终版 Guitar Girl 8.0.0 的完整、未修改 XAPK。先找找自己的下载备份；也可以在 APKPure 等应用目录核对游戏名和版本。请使用你有权使用的副本。</p></li>
+<li><h3><a href="#patcher" data-i18n="step2">制作并下载</a></h3><p data-i18n="make">在本页选择原包。版本符合要求后，点「制作纪念版」，再点出现的下载按钮，把新的 XAPK 保存到手机。</p></li>
+<li><h3 data-i18n="step3">安装，回去听歌</h3><p data-i18n="install">用支持 XAPK 的安装器打开刚下载的纪念版文件，按 Android 提示完成安装。打开 Guitar Girl Fan Memorial Build，点启动，戴上耳机，玩得开心！</p><a href="https://f-droid.org/packages/app.pwhs.universalinstaller/" data-i18n="installer">开源安装器 · Universal Installer ↗</a></li></ol></section>
+<section class="tool" id="patcher"><h2 data-i18n="build">制作纪念版</h2><label class="drop" for="source"><strong data-i18n="choose">选择 Guitar Girl 8.0.0 XAPK</strong><span id="filename">尚未选择</span><input id="source" type="file"></label>
+<progress id="progress" max="1" value="0"></progress><div class="actions"><button id="upload" disabled>读取配置中……</button></div><div id="status" role="status"></div></section></div>
+<section class="band"><h2 data-i18n="features">回到游戏以后</h2><div class="twocol"><article><h3 data-i18n="feat1">按自己的节奏养成</h3><p data-i18n="feat1body">多项升级的要求降到原版的十分之一；原来需要付费的商店礼包也可以免费领取。</p></article><article><h3 data-i18n="feat2">补回错过的限定</h3><p data-i18n="feat2body">打开游戏设置里的「纪念版功能」，就能通过邮箱领取绝版服装和吉他、补充资源，也可以切换想玩的星级通行证。</p></article></div></section>
+<section class="sharing"><h2 data-i18n="share">把重逢留给想念她的人</h2><p data-i18n="sharebody">在论坛或社媒遇到怀念《吉他少女》的人，欢迎回帖告诉他们可以回来玩了。分享时只留项目 GitHub 或本页链接，也请尽量避免大范围主动发帖宣传。</p><p><strong data-i18n="noshare">请勿分发原版或补丁后的 XAPK。</strong> <span data-i18n="why">转发安装包或上传网盘，可能让维护者收到版权投诉，甚至导致项目下架。谢谢你帮我们照顾好这个小项目。</span></p></section>
+<section class="support"><h2 data-i18n="support">遇到问题了？</h2><p data-i18n="help">告诉我们你的手机型号、纪念版版本，以及在哪一步遇到了问题。截图或诊断日志也很有用。</p><div class="links"><a href="https://github.com/guitar-girl-resuscitation/.github/issues/new" data-i18n="issue">在 GitHub 提交反馈 ↗</a><a href="https://discord.gg/AVq9mxNYP" data-i18n="discord">去 Discord 聊聊 ↗</a></div></section>
+<details><summary data-i18n="tech">构建信息</summary><p class="version-note" data-i18n="versionsTitle"></p><div id="versions"></div><code id="hash"></code></details></main>
+<footer><p data-i18n="footer">本项目由玩家独立维护，与 NEOWIZ 无关。游戏及原作素材的权利归各自权利人所有。</p></footer>
 <script>
 const $=id=>document.getElementById(id), source=$('source'), status=$('status'), progress=$('progress');
 let file=null, digest='', health=null, selection=0, busy=false;
 const messages={
- zh:{intro:'选择你自己持有的原版 XAPK。文件会先在浏览器中分块计算 SHA-256；不匹配的版本不会上传。',privacy:'公开源码不包含游戏。完整上传模式会删除临时原包；部署者启用私有预置模式后，校验通过即可下载已缓存成品，仅上传随机校验分块。',choose:'选择 Guitar Girl 8.0.0 XAPK',none:'尚未选择',loading:'读取配置中……',loadingStatus:'正在读取部署配置……',hashing:'正在本地分块计算 SHA-256……',large:'文件超过 768 MiB 上限',matchedCache:'版本匹配，部署者已有成品：只需分块验证，无须完整上传或重新 Patch。',matchedUpload:'版本匹配：需要完整上传，完成后提供下载。',mismatch:'这个文件不在兼容清单中，不会上传。',retry:'请在 {seconds} 秒后重试',download:'下载已完成的纪念版 XAPK',done:'Patch 已完成。下载链接十分钟内有效，可重试。',verifying:'正在验证随机分块，不会重新构建……',badChallenge:'无效的校验挑战',badRange:'无效的校验范围',uploading:'正在完整上传并 Patch；服务端仅运行一个构建，请稍候……',verifyButton:'验证并下载纪念版',uploadButton:'完整上传并 Patch',supported:'支持 Guitar Girl {version}\nSHA-256: {hash}',loadFailed:'无法读取部署配置：{error}',failed:'操作失败：{error}',progress:'文件 SHA-256 校验进度'},
- en:{intro:'Choose your own original XAPK. SHA-256 is calculated locally in chunks before upload; unsupported versions are not uploaded.',privacy:'The public source does not include the game. Full-upload mode removes temporary input files. If the operator provides a verified source package, only random verification chunks are uploaded and you can download the cached build.',choose:'Choose Guitar Girl 8.0.0 XAPK',none:'No file selected',loading:'Loading configuration…',loadingStatus:'Reading deployment configuration…',hashing:'Calculating SHA-256 locally in chunks…',large:'File exceeds the 768 MiB limit',matchedCache:'Version matched. A prepared build is available: verify file chunks to download without uploading the full file or rebuilding.',matchedUpload:'Version matched. Upload the full file to patch it and download the result.',mismatch:'This file is not supported and will not be uploaded.',retry:'Retry in {seconds} seconds',download:'Download the Memorial Build XAPK',done:'Patch complete. The download link is valid for ten minutes and supports retries.',verifying:'Verifying random file chunks; no rebuild is needed…',badChallenge:'Invalid verification challenge',badRange:'Invalid verification range',uploading:'Uploading and patching the full file. The server runs one build at a time; please wait…',verifyButton:'Verify and download',uploadButton:'Upload and patch',supported:'Supports Guitar Girl {version}\nSHA-256: {hash}',loadFailed:'Could not load deployment configuration: {error}',failed:'Operation failed: {error}',progress:'File SHA-256 verification progress'}
+  "zh": {
+    "intro": "这是玩家为《吉他少女》做的离线纪念版。补丁会把服务端一起装进游戏，往后即使没有网络，莉莉也能继续弹给你听。",
+    "choose": "选择 Guitar Girl 8.0.0 XAPK",
+    "none": "尚未选择",
+    "loading": "读取配置中……",
+    "loadingStatus": "正在读取部署配置……",
+    "hashing": "正在检查安装包版本……",
+    "large": "文件超过 768 MiB 上限",
+    "matchedCache": "版本符合要求，可以开始制作了。",
+    "matchedUpload": "版本符合要求，可以开始制作了。",
+    "mismatch": "版本不匹配，请选择未修改的 8.0.0 原版 XAPK。",
+    "retry": "请在 {seconds} 秒后重试",
+    "download": "下载已完成的纪念版 XAPK",
+    "done": "Patch 已完成。下载链接十分钟内有效，可重试。",
+    "verifying": "正在确认原包并准备纪念版……",
+    "badChallenge": "无效的校验挑战",
+    "badRange": "无效的校验范围",
+    "uploading": "正在上传并制作纪念版，请稍候……",
+    "verifyButton": "制作纪念版",
+    "uploadButton": "制作纪念版",
+    "supported": "支持 Android 原版 {version} XAPK",
+    "loadFailed": "无法读取部署配置：{error}",
+    "failed": "操作失败：{error}",
+    "progress": "安装包检查进度",
+    "guide": "从原版到纪念版",
+    "step1": "准备原版 XAPK",
+    "get": "需要 Android 最终版 Guitar Girl 8.0.0 的完整、未修改 XAPK。先找找自己的下载备份；也可以在 APKPure 等应用目录核对游戏名和版本。请使用你有权使用的副本。",
+    "step2": "制作并下载",
+    "make": "在本页选择原包。版本符合要求后，点「制作纪念版」，再点出现的下载按钮，把新的 XAPK 保存到手机。",
+    "step3": "安装，回去听歌",
+    "install": "用支持 XAPK 的安装器打开刚下载的纪念版文件，按 Android 提示完成安装。打开 Guitar Girl Fan Memorial Build，点启动，戴上耳机，玩得开心！",
+    "installer": "开源安装器 · Universal Installer ↗",
+    "build": "制作纪念版",
+    "features": "回到游戏以后",
+    "feat1": "按自己的节奏养成",
+    "feat1body": "多项升级的要求降到原版的十分之一；原来需要付费的商店礼包也可以免费领取。",
+    "feat2": "补回错过的限定",
+    "feat2body": "打开游戏设置里的「纪念版功能」，就能通过邮箱领取绝版服装和吉他、补充资源，也可以切换想玩的星级通行证。",
+    "share": "把重逢留给想念她的人",
+    "sharebody": "在论坛或社媒遇到怀念《吉他少女》的人，欢迎回帖告诉他们可以回来玩了。分享时只留项目 GitHub 或本页链接，也请尽量避免大范围主动发帖宣传。",
+    "noshare": "请勿分发原版或补丁后的 XAPK。",
+    "why": "转发安装包或上传网盘，可能让维护者收到版权投诉，甚至导致项目下架。谢谢你帮我们照顾好这个小项目。",
+    "support": "遇到问题了？",
+    "help": "告诉我们你的手机型号、纪念版版本，以及在哪一步遇到了问题。截图或诊断日志也很有用。",
+    "issue": "在 GitHub 提交反馈 ↗",
+    "discord": "去 Discord 聊聊 ↗",
+    "footer": "本项目由玩家独立维护，与 NEOWIZ 无关。游戏及原作素材的权利归各自权利人所有。",
+    "tech": "构建信息"
+  },
+  "en": {
+    "intro": "A fan-made way to play Guitar Girl offline. The patch puts the server on your device, so Lily can keep playing even when you have no connection.",
+    "choose": "Choose Guitar Girl 8.0.0 XAPK",
+    "none": "No file selected",
+    "loading": "Loading configuration…",
+    "loadingStatus": "Reading deployment configuration…",
+    "hashing": "Checking the package version…",
+    "large": "File exceeds the 768 MiB limit",
+    "matchedCache": "Version confirmed. Ready to build.",
+    "matchedUpload": "Version confirmed. Ready to build.",
+    "mismatch": "Version mismatch. Choose the unmodified 8.0.0 XAPK.",
+    "retry": "Retry in {seconds} seconds",
+    "download": "Download the Memorial Build XAPK",
+    "done": "Patch complete. The download link is valid for ten minutes and supports retries.",
+    "verifying": "Checking your package and preparing the build…",
+    "badChallenge": "Invalid verification challenge",
+    "badRange": "Invalid verification range",
+    "uploading": "Uploading and building your memorial edition…",
+    "verifyButton": "Build memorial edition",
+    "uploadButton": "Build memorial edition",
+    "supported": "Supports the original Android {version} XAPK",
+    "loadFailed": "Could not load deployment configuration: {error}",
+    "failed": "Operation failed: {error}",
+    "progress": "Package check progress",
+    "guide": "From the original to offline play",
+    "step1": "Find your original XAPK",
+    "get": "You’ll need the complete, unmodified Android XAPK for Guitar Girl’s final release, 8.0.0. Check your own downloads or backups first. App catalogs such as APKPure can help you identify the release. Use a copy you have permission to use.",
+    "step2": "Patch and download",
+    "make": "Select the original file on this page. Once its version is confirmed, choose “Build memorial edition”, then use the download button to save the new XAPK to your phone.",
+    "step3": "Install and play",
+    "install": "Open the downloaded memorial XAPK with an XAPK installer and follow the Android installation prompts. Launch Guitar Girl Fan Memorial Build, tap Start, and enjoy the music!",
+    "installer": "Open-source installer · Universal Installer ↗",
+    "build": "Build memorial edition",
+    "features": "Once you’re back in the game",
+    "feat1": "Play at your own pace",
+    "feat1body": "Many upgrade requirements are a tenth of their original values. Shop packs that once cost real money are free to claim.",
+    "feat2": "Pick up what you missed",
+    "feat2body": "In game settings, open Memorial Features to send retired outfits, guitars, and resources to your mailbox, or switch to a favorite Star Pass season.",
+    "share": "For the people who miss her",
+    "sharebody": "If someone on a forum or social feed says they miss Guitar Girl, feel free to reply and let them know they can play again. Please share only the project’s GitHub or this patcher page, and skip broad promotional posts.",
+    "noshare": "Please don’t distribute the original or patched XAPK.",
+    "why": "Reposting the files or uploading them to a shared drive could bring copyright complaints to the volunteers and put the project at risk of removal. Thanks for helping us keep it going.",
+    "support": "Something went wrong?",
+    "help": "Tell us your phone model, memorial build version, and the step where things went wrong. A screenshot or diagnostic log helps, too.",
+    "issue": "Report an issue on GitHub ↗",
+    "discord": "Talk to us on Discord ↗",
+    "footer": "Independently maintained by fans and unaffiliated with NEOWIZ. The game and original assets belong to their respective rights holders.",
+    "tech": "Build details"
+  }
 };
 let language='en', statusKey='loadingStatus', statusArgs={}, completed=null;
 Object.assign(messages.zh,{versionsTitle:'当前部署使用的组件 · 源码更新时间（UTC）',unknownVersion:'未记录',versionsPending:'等待读取部署信息'});
@@ -75,4 +160,4 @@ $('upload').onclick=async()=>{if(busy||!file||!health||digest!==health.sourceSha
 const ready=json('/healthz').then(h=>{health=h;if(!file)show('supported',{version:h.sourceVersion,hash:h.sourceSha256});renderLanguage();return h});
 ready.catch(e=>{show('loadFailed',{error:e.message});enable(false)});
 </script>
-</html>
+</body></html>
