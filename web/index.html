@@ -9,9 +9,16 @@ a{color:var(--accent);text-underline-offset:4px}a:hover{text-decoration-thicknes
 .layout{display:grid;grid-template-columns:1.12fr 1fr;gap:clamp(24px,5vw,64px);align-items:start}.guide{padding-top:8px}ol{padding:0;list-style:none;counter-reset:steps}li{counter-increment:steps;position:relative;padding:0 0 22px 48px}li:before{content:counter(steps,decimal-leading-zero);position:absolute;left:0;top:0;color:var(--accent);font:18px/1.55 "IBM Plex Mono",monospace}li p,article p,.support p,footer{color:var(--sub)}li p+a{display:inline-block;margin-top:7px}
 .tool{padding:clamp(20px,3vw,32px);background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--accent);border-radius:12px}.drop{display:grid;gap:4px;background:#2c2632;border:1px dashed #a98595;padding:23px 14px;border-radius:8px;margin:20px 0 12px;text-align:center;cursor:pointer}.drop:hover{background:#372d3a}.drop input{position:absolute;width:1px;height:1px;opacity:0}.muted,#filename{color:var(--sub)}#filename,#status,#hash{overflow-wrap:anywhere}button,a.button{display:inline-flex;align-items:center;justify-content:center;min-height:44px;max-width:100%;padding:10px 20px;border:0;border-radius:7px;background:var(--accent);color:#30202a;text-decoration:none;line-height:1.45;font-family:inherit;font-size:1rem;font-weight:700;cursor:pointer}button:disabled{color:#c9c1ce;background:#47404c;cursor:not-allowed}.actions button{width:100%}progress{width:100%;height:6px;accent-color:var(--accent);display:block;margin:14px 0}#status{margin-top:12px;color:var(--sub);font-size:.94rem}#status.complete{display:flex;flex-direction:column;align-items:flex-start;gap:14px}
 .band,.sharing,details{margin:24px 0;padding:28px 0;border-top:1px solid var(--line)}.twocol{display:grid;grid-template-columns:1fr 1fr;gap:24px 48px;margin-top:20px}.sharing{border-left:3px solid var(--accent);padding:20px 24px;background:#251f29}.sharing p,.support p{margin-top:10px}.sharing strong{color:var(--accent)}.links{display:flex;flex-wrap:wrap;gap:12px;margin-top:16px}.links a{border:1px solid var(--line);border-radius:6px;padding:9px 14px;text-decoration:none}.links a:hover{border-color:var(--accent)}summary{cursor:pointer;font-weight:700}#versions{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:16px;margin-top:10px}#versions article>*{display:block}code,small{color:var(--sub)}footer{font-size:.88rem;border-top:1px solid var(--line);border-bottom:0}.version-note{margin-top:14px}
-@media(max-width:720px){.layout,.twocol{grid-template-columns:1fr}.layout{gap:10px}.hero{padding-top:32px}.tool{margin-bottom:10px}header,main,footer{width:calc(100% - 32px)}li{padding-left:38px}.twocol{gap:16px}}</style></head><body>
-<header><a href="https://github.com/guitar-girl-resuscitation">Guitar Girl / GitHub ↗</a><label>Language / 语言 <select id="language"><option value="zh">简体中文</option><option value="en">English</option></select></label></header>
-<main><div class="hero"><h1>Guitar Girl<span>Fan Memorial Build</span></h1><p data-i18n="intro">这是玩家为《吉他少女》做的离线纪念版。补丁会把服务端一起装进游戏，往后即使没有网络，莉莉也能继续弹给你听。</p></div>
+.mobile-start{display:none}.tool,.guide{min-width:0}#patcher{scroll-margin-top:12px}
+@media(max-width:720px){
+  .layout,.twocol{grid-template-columns:minmax(0,1fr)}.layout{gap:10px}.hero{padding-top:24px}.tool{margin-bottom:10px}
+  header,main,footer{width:calc(100% - 32px)}header{padding:8px 0;gap:8px}
+  header>a,.mobile-start,li a,summary{display:inline-flex;align-items:center;min-height:44px}header select{min-height:44px}
+  .mobile-start{margin-top:12px;font-weight:700}li{padding-left:38px}.twocol{gap:16px}
+  summary{display:list-item;line-height:44px}.links a{min-height:44px}
+}</style></head><body>
+<header><a href="https://github.com/guitar-girl-resuscitation">Guitar Girl / GitHub ↗</a><select id="language" aria-label="Language / 语言"><option value="zh">简体中文</option><option value="en">English</option></select></header>
+<main><div class="hero"><h1>Guitar Girl<span>Fan Memorial Build</span></h1><p data-i18n="intro">这是玩家为《吉他少女》做的离线纪念版。补丁会把服务端一起装进游戏，往后即使没有网络，莉莉也能继续弹给你听。</p><a class="mobile-start" href="#patcher" data-i18n="jump">已有原包？前往选择文件 ↓</a></div>
 <div class="layout"><section class="guide"><h2 data-i18n="guide">从原版到纪念版</h2><ol>
 <li><h3 data-i18n="step1">准备原版 XAPK</h3><p data-i18n="get">需要 Android 最终版 Guitar Girl 8.0.0 的完整、未修改 XAPK。先找找自己的下载备份；也可以在 APKPure 等应用目录核对游戏名和版本。请使用你有权使用的副本。</p></li>
 <li><h3><a href="#patcher" data-i18n="step2">制作并下载</a></h3><p data-i18n="make">在本页选择原包。版本符合要求后，点「制作纪念版」，再点出现的下载按钮，把新的 XAPK 保存到手机。</p></li>
@@ -74,7 +81,8 @@ const messages={
     "issue": "在 GitHub 提交反馈 ↗",
     "discord": "去 Discord 聊聊 ↗",
     "footer": "本项目由玩家独立维护，与 NEOWIZ 无关。游戏及原作素材的权利归各自权利人所有。",
-    "tech": "构建信息"
+    "tech": "构建信息",
+    "jump": "已有原包？前往选择文件 ↓"
   },
   "en": {
     "intro": "A fan-made way to play Guitar Girl offline. The patch puts the server on your device, so Lily can keep playing even when you have no connection.",
@@ -123,7 +131,8 @@ const messages={
     "issue": "Report an issue on GitHub ↗",
     "discord": "Talk to us on Discord ↗",
     "footer": "Independently maintained by fans and unaffiliated with NEOWIZ. The game and original assets belong to their respective rights holders.",
-    "tech": "Build details"
+    "tech": "Build details",
+    "jump": "Have the XAPK? Go to file selection ↓"
   }
 };
 let language='en', statusKey='loadingStatus', statusArgs={}, completed=null;
